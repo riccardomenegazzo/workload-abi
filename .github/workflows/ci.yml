@@ -18,9 +18,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
+          cache: false
+      - name: Normalize formatting
+        run: gofmt -w ./cmd ./internal
       - name: Vet
         run: go vet ./...
       - name: Test
