@@ -1,0 +1,17 @@
+{
+  "name": "payment-api-smoke",
+  "settle_ms": 400,
+  "observation_ms": 3200,
+  "sample_interval_ms": 300,
+  "shutdown_timeout_ms": 15000,
+  "probes": [
+    {
+      "port": 8080,
+      "method": "GET",
+      "path": "/health",
+      "expect_status": 200,
+      "repeat": 2,
+      "interval_ms": 150
+    }
+  ]
+}
