@@ -21,6 +21,8 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: false
+      - name: Format
+        run: test -z "$(gofmt -l ./cmd ./internal)"
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -40,7 +42,9 @@ jobs:
       - name: Build CLI
         run: make build
       - name: Build demo images
-        run: make demo-build
+        run: |
+          make demo-build
+          make scratch-build
       - name: Compare API-compatible releases with CLI
         run: |
           mkdir -p out
@@ -58,6 +62,14 @@ jobs:
           ! grep -q '172.17.0.1' out/result.json
           ! grep -q '"path": "/var"' out/result.json
           ! grep -q '"path": "/var/lib"' out/result.json
+      - name: Record shell-less scratch image
+        run: |
+          ./bin/wabi record wabi-demo/scratch-app:v1 \
+            --scenario examples/payment-api/scenario.json \
+            --output out/scratch.json
+          grep -q '"local_port": 8080' out/scratch.json
+          ! grep -q 'network sampling unavailable' out/scratch.json
+          ! grep -q 'privilege sampling unavailable' out/scratch.json
       - name: Compare with reusable action
         id: action-smoke
         uses: ./
