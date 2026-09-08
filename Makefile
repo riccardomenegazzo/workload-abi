@@ -2,7 +2,7 @@ BINARY ?= bin/wabi
 VERSION ?= dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build test vet fmt check clean demo-build demo release-snapshot
+.PHONY: all build test vet fmt check clean demo-build scratch-build demo release-snapshot
 
 all: check build
 
@@ -30,6 +30,9 @@ clean:
 demo-build:
 	docker build -t wabi-demo/payment-api:v1 examples/payment-api/v1
 	docker build -t wabi-demo/payment-api:v2 examples/payment-api/v2
+
+scratch-build:
+	docker build -t wabi-demo/scratch-app:v1 examples/scratch-app
 
 demo: build demo-build
 	@mkdir -p out
