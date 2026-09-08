@@ -5,6 +5,7 @@ import "time"
 type Snapshot struct {
 	Image       string             `json:"image"`
 	ImageID     string             `json:"image_id,omitempty"`
+	Scenario    string             `json:"scenario,omitempty"`
 	CapturedAt  time.Time          `json:"captured_at"`
 	Processes   []Process          `json:"processes,omitempty"`
 	Filesystem  []FilesystemChange `json:"filesystem,omitempty"`
@@ -71,6 +72,7 @@ type Change struct {
 type Comparison struct {
 	Baseline  string   `json:"baseline"`
 	Candidate string   `json:"candidate"`
+	Scenario  string   `json:"scenario,omitempty"`
 	Target    string   `json:"target,omitempty"`
 	Verdict   string   `json:"verdict"`
 	Changes   []Change `json:"changes"`
