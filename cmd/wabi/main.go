@@ -52,7 +52,7 @@ func runCompare(args []string) int {
 		return 2
 	}
 
-	opts, err := recorderOptions(*observe, *scenarioFile)
+	opts, scenarioName, err := recorderOptions(*observe, *scenarioFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "scenario:", err)
 		return 1
@@ -77,8 +77,11 @@ func runCompare(args []string) int {
 		fmt.Fprintln(os.Stderr, "candidate:", err)
 		return 1
 	}
+	base.Scenario = scenarioName
+	candidate.Scenario = scenarioName
 
 	comparison := diff.Compare(base, candidate)
+	comparison.Scenario = scenarioName
 	if *targetFile != "" {
 		t, err := target.LoadCompose(ctx, *targetFile, *service)
 		if err != nil {
@@ -115,7 +118,7 @@ func runRecord(args []string) int {
 		return 2
 	}
 
-	opts, err := recorderOptions(*observe, *scenarioFile)
+	opts, scenarioName, err := recorderOptions(*observe, *scenarioFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "scenario:", err)
 		return 1
@@ -133,6 +136,7 @@ func runRecord(args []string) int {
 		fmt.Fprintln(os.Stderr, "wabi:", err)
 		return 1
 	}
+	snapshot.Scenario = scenarioName
 	if err := report.JSON(os.Stdout, snapshot); err != nil {
 		fmt.Fprintln(os.Stderr, "wabi:", err)
 		return 1
@@ -140,18 +144,22 @@ func runRecord(args []string) int {
 	return 0
 }
 
-func recorderOptions(observe time.Duration, scenarioFile string) (docker.Options, error) {
+func recorderOptions(observe time.Duration, scenarioFile string) (docker.Options, string, error) {
 	opts := docker.Options{Observe: observe}
 	if scenarioFile == "" {
-		return opts, nil
+		return opts, "", nil
 	}
 	s, err := scenario.Load(scenarioFile)
 	if err != nil {
-		return opts, err
+		return opts, "", err
 	}
 	opts.Environment = s.EnvList()
 	opts.Command = append([]string(nil), s.Command...)
-	return opts, nil
+	name := s.Name
+	if name == "" {
+		name = scenarioFile
+	}
+	return opts, name, nil
 }
 
 func usage() {
