@@ -3,16 +3,16 @@ package model
 import "time"
 
 type Snapshot struct {
-	Image       string            `json:"image"`
-	ImageID     string            `json:"image_id,omitempty"`
-	CapturedAt  time.Time         `json:"captured_at"`
-	Processes   []Process         `json:"processes,omitempty"`
+	Image       string             `json:"image"`
+	ImageID     string             `json:"image_id,omitempty"`
+	CapturedAt  time.Time          `json:"captured_at"`
+	Processes   []Process          `json:"processes,omitempty"`
 	Filesystem  []FilesystemChange `json:"filesystem,omitempty"`
-	ImageConfig ImageConfig       `json:"image_config"`
-	Runtime     RuntimeFacts      `json:"runtime"`
-	Lifecycle   Lifecycle         `json:"lifecycle"`
-	Stats       Stats             `json:"stats,omitempty"`
-	Warnings    []string          `json:"warnings,omitempty"`
+	ImageConfig ImageConfig        `json:"image_config"`
+	Runtime     RuntimeFacts       `json:"runtime"`
+	Lifecycle   Lifecycle          `json:"lifecycle"`
+	Stats       Stats              `json:"stats,omitempty"`
+	Warnings    []string           `json:"warnings,omitempty"`
 }
 
 type Process struct {
@@ -69,8 +69,9 @@ type Change struct {
 }
 
 type Comparison struct {
-	Baseline string   `json:"baseline"`
-	Candidate string  `json:"candidate"`
-	Verdict  string   `json:"verdict"`
-	Changes  []Change `json:"changes"`
+	Baseline  string   `json:"baseline"`
+	Candidate string   `json:"candidate"`
+	Target    string   `json:"target,omitempty"`
+	Verdict   string   `json:"verdict"`
+	Changes   []Change `json:"changes"`
 }
