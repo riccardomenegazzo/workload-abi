@@ -61,6 +61,9 @@ func (r *Recorder) CollectWithOptions(ctx context.Context, image string, opts Op
 	if err := r.Pull(ctx, image); err != nil {
 		return snap, err
 	}
+	if err := r.inspectImage(ctx, image, &snap); err != nil {
+		return snap, fmt.Errorf("inspect image: %w", err)
+	}
 
 	name := fmt.Sprintf("wabi-%d", time.Now().UnixNano())
 	createArgs := []string{"create", "--name", name}
@@ -78,7 +81,7 @@ func (r *Recorder) CollectWithOptions(ctx context.Context, image string, opts Op
 	containerID := strings.TrimSpace(string(out))
 	defer exec.Command(r.binary, "rm", "-f", containerID).Run() //nolint:errcheck
 
-	if err := r.inspect(ctx, containerID, &snap); err != nil {
+	if err := r.inspectContainer(ctx, containerID, &snap); err != nil {
 		return snap, err
 	}
 
@@ -117,7 +120,7 @@ func (r *Recorder) CollectWithOptions(ctx context.Context, image string, opts Op
 		snap.Warnings = append(snap.Warnings, "runtime stats unavailable: "+err.Error())
 	}
 
-	if err := r.inspect(ctx, containerID, &snap); err != nil {
+	if err := r.inspectContainer(ctx, containerID, &snap); err != nil {
 		snap.Warnings = append(snap.Warnings, "final inspect unavailable: "+err.Error())
 	}
 
@@ -134,7 +137,7 @@ func (r *Recorder) CollectWithOptions(ctx context.Context, image string, opts Op
 	return snap, nil
 }
 
-type inspectPayload struct {
+type imageInspectPayload struct {
 	ID     string `json:"Id"`
 	Config struct {
 		User         string         `json:"User"`
@@ -147,6 +150,9 @@ type inspectPayload struct {
 			Test []string `json:"Test"`
 		} `json:"Healthcheck"`
 	} `json:"Config"`
+}
+
+type containerInspectPayload struct {
 	HostConfig struct {
 		Privileged     bool     `json:"Privileged"`
 		ReadonlyRootfs bool     `json:"ReadonlyRootfs"`
@@ -162,18 +168,18 @@ type inspectPayload struct {
 	} `json:"State"`
 }
 
-func (r *Recorder) inspect(ctx context.Context, id string, snap *model.Snapshot) error {
-	cmd := exec.CommandContext(ctx, r.binary, "inspect", id)
+func (r *Recorder) inspectImage(ctx context.Context, image string, snap *model.Snapshot) error {
+	cmd := exec.CommandContext(ctx, r.binary, "image", "inspect", image)
 	out, err := cmd.Output()
 	if err != nil {
 		return err
 	}
-	var payload []inspectPayload
+	var payload []imageInspectPayload
 	if err := json.Unmarshal(out, &payload); err != nil {
 		return err
 	}
 	if len(payload) != 1 {
-		return fmt.Errorf("unexpected inspect payload length: %d", len(payload))
+		return fmt.Errorf("unexpected image inspect payload length: %d", len(payload))
 	}
 	p := payload[0]
 	snap.ImageID = p.ID
@@ -182,17 +188,35 @@ func (r *Recorder) inspect(ctx context.Context, id string, snap *model.Snapshot)
 	snap.ImageConfig.Cmd = p.Config.Cmd
 	snap.ImageConfig.WorkingDir = p.Config.WorkingDir
 	snap.ImageConfig.StopSignal = p.Config.StopSignal
+	snap.ImageConfig.ExposedPorts = snap.ImageConfig.ExposedPorts[:0]
 	for port := range p.Config.ExposedPorts {
 		snap.ImageConfig.ExposedPorts = append(snap.ImageConfig.ExposedPorts, port)
 	}
 	sort.Strings(snap.ImageConfig.ExposedPorts)
 	if p.Config.Healthcheck != nil {
-		snap.ImageConfig.Healthcheck = p.Config.Healthcheck.Test
+		snap.ImageConfig.Healthcheck = append([]string(nil), p.Config.Healthcheck.Test...)
 	}
+	return nil
+}
+
+func (r *Recorder) inspectContainer(ctx context.Context, id string, snap *model.Snapshot) error {
+	cmd := exec.CommandContext(ctx, r.binary, "inspect", id)
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+	var payload []containerInspectPayload
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return err
+	}
+	if len(payload) != 1 {
+		return fmt.Errorf("unexpected container inspect payload length: %d", len(payload))
+	}
+	p := payload[0]
 	snap.Runtime.Privileged = p.HostConfig.Privileged
 	snap.Runtime.ReadonlyRootfs = p.HostConfig.ReadonlyRootfs
-	snap.Runtime.CapAdd = p.HostConfig.CapAdd
-	snap.Runtime.CapDrop = p.HostConfig.CapDrop
+	snap.Runtime.CapAdd = append([]string(nil), p.HostConfig.CapAdd...)
+	snap.Runtime.CapDrop = append([]string(nil), p.HostConfig.CapDrop...)
 	snap.Runtime.MemoryLimit = p.HostConfig.Memory
 	snap.Runtime.NanoCPUs = p.HostConfig.NanoCPUs
 	if p.HostConfig.PidsLimit != nil {
