@@ -9,18 +9,24 @@ import (
 
 func TestCompareDetectsOperationalChanges(t *testing.T) {
 	base := model.Snapshot{
-		Image: "app:v1",
-		Processes: []model.Process{{Command: "app --serve"}},
-		Filesystem: []model.FilesystemChange{{Kind: "C", Path: "/tmp/cache"}},
+		Image:       "app:v1",
+		Processes:   []model.Process{{Command: "app --serve"}},
+		Filesystem:  []model.FilesystemChange{{Kind: "C", Path: "/tmp/cache"}},
 		ImageConfig: model.ImageConfig{User: "1000", ExposedPorts: []string{"8080/tcp"}},
-		Lifecycle: model.Lifecycle{StopDuration: time.Second},
+		Lifecycle:   model.Lifecycle{StopDuration: time.Second},
 	}
 	candidate := model.Snapshot{
 		Image: "app:v2",
-		Processes: []model.Process{{Command: "app --serve"}, {Command: "curl telemetry.example"}},
-		Filesystem: []model.FilesystemChange{{Kind: "C", Path: "/tmp/cache"}, {Kind: "A", Path: "/var/lib/app/state"}},
+		Processes: []model.Process{
+			{Command: "app --serve"},
+			{Command: "curl telemetry.example"},
+		},
+		Filesystem: []model.FilesystemChange{
+			{Kind: "C", Path: "/tmp/cache"},
+			{Kind: "A", Path: "/var/lib/app/state"},
+		},
 		ImageConfig: model.ImageConfig{User: "0", ExposedPorts: []string{"8080/tcp", "9090/tcp"}},
-		Lifecycle: model.Lifecycle{StopDuration: 3 * time.Second},
+		Lifecycle:   model.Lifecycle{StopDuration: 3 * time.Second},
 	}
 
 	got := Compare(base, candidate)
