@@ -1,0 +1,107 @@
+name: Workload ABI Compare
+description: Detect operational breaking changes between two container releases.
+author: Workload ABI contributors
+
+branding:
+  icon: activity
+  color: blue
+
+inputs:
+  baseline:
+    description: Baseline container image reference.
+    required: true
+  candidate:
+    description: Candidate container image reference.
+    required: true
+  scenario:
+    description: Optional path to a Workload ABI scenario JSON file.
+    required: false
+    default: ''
+  target:
+    description: Optional Docker Compose file to evaluate as the target environment.
+    required: false
+    default: ''
+  service:
+    description: Optional Compose service name.
+    required: false
+    default: ''
+  fail-on:
+    description: Failure threshold: breaking, degraded, or never.
+    required: false
+    default: breaking
+  timeout:
+    description: Overall comparison timeout understood by Go duration parsing.
+    required: false
+    default: 5m
+
+outputs:
+  result:
+    description: Path to the machine-readable Workload ABI result JSON.
+    value: ${{ steps.compare.outputs.result }}
+  status:
+    description: Runtime compatibility status when a target solver is used.
+    value: ${{ steps.compare.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23.x'
+        cache: false
+
+    - name: Build Workload ABI
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_ACTION_PATH"
+        go build -trimpath -ldflags "-X main.version=${GITHUB_ACTION_REF:-action}" \
+          -o "$RUNNER_TEMP/wabi" ./cmd/wabi
+
+    - id: compare
+      name: Compare runtime behavior
+      shell: bash
+      env:
+        WABI_BASELINE: ${{ inputs.baseline }}
+        WABI_CANDIDATE: ${{ inputs.candidate }}
+        WABI_SCENARIO: ${{ inputs.scenario }}
+        WABI_TARGET: ${{ inputs.target }}
+        WABI_SERVICE: ${{ inputs.service }}
+        WABI_FAIL_ON: ${{ inputs.fail-on }}
+        WABI_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        result="$RUNNER_TEMP/workload-abi-result.json"
+        args=(compare "$WABI_BASELINE" "$WABI_CANDIDATE" --json "$result" --fail-on "$WABI_FAIL_ON" --timeout "$WABI_TIMEOUT")
+
+        if [[ -n "$WABI_SCENARIO" ]]; then
+          args+=(--scenario "$WABI_SCENARIO")
+        fi
+        if [[ -n "$WABI_TARGET" ]]; then
+          args+=(--target "$WABI_TARGET")
+        fi
+        if [[ -n "$WABI_SERVICE" ]]; then
+          args+=(--service "$WABI_SERVICE")
+        fi
+
+        set +e
+        "$RUNNER_TEMP/wabi" "${args[@]}"
+        rc=$?
+        set -e
+
+        echo "result=$result" >> "$GITHUB_OUTPUT"
+        if [[ -f "$result" ]]; then
+          status="$(python3 - "$result" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding='utf-8') as f:
+    data = json.load(f)
+print((data.get('compatibility') or {}).get('status', 'not-evaluated'))
+PY
+)"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=error" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit "$rc"

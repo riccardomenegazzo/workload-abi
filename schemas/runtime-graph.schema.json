@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/runtime-graph-v1alpha1.json",
+  "title": "Workload ABI RuntimeGraph",
+  "type": "object",
+  "required": ["schema_version", "image", "captured_at", "privileges", "resources", "lifecycle"],
+  "properties": {
+    "schema_version": {"const": "wabi.dev/v1alpha1"},
+    "image": {
+      "type": "object",
+      "required": ["reference"],
+      "properties": {
+        "reference": {"type": "string"},
+        "id": {"type": "string"},
+        "digest": {"type": "string"},
+        "user": {"type": "string"}
+      }
+    },
+    "scenario": {"type": "string"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "processes": {"type": "array", "items": {"type": "object"}},
+    "network": {"type": "array", "items": {"type": "object"}},
+    "filesystem": {"type": "array", "items": {"type": "object"}},
+    "privileges": {"type": "object"},
+    "resources": {"type": "object"},
+    "lifecycle": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

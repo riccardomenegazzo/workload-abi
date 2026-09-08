@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit / Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.23.x', '1.24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: Format
+        run: test -z "$(gofmt -l ./cmd ./internal)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build ./cmd/wabi
+
+  integration:
+    name: Docker end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Build CLI
+        run: make build
+      - name: Build demo images
+        run: |
+          make demo-build
+          make scratch-build
+      - name: Compare API-compatible releases with CLI
+        run: |
+          mkdir -p out
+          ./bin/wabi compare wabi-demo/payment-api:v1 wabi-demo/payment-api:v2 \
+            --scenario examples/payment-api/scenario.json \
+            --target examples/payment-api/compose.yaml \
+            --service payment-api \
+            --graphs-dir out/graphs \
+            --json out/result.json \
+            --fail-on never
+      - name: Assert signal quality and breaking compatibility
+        run: |
+          grep -q '"status": "breaking"' out/result.json
+          grep -q '"local_port": 9090' out/result.json
+          ! grep -q '172.17.0.1' out/result.json
+          ! grep -q '"path": "/var"' out/result.json
+          ! grep -q '"path": "/var/lib"' out/result.json
+      - name: Record shell-less scratch image
+        run: |
+          ./bin/wabi record wabi-demo/scratch-app:v1 \
+            --scenario examples/payment-api/scenario.json \
+            --output out/scratch.json
+          grep -q '"local_port": 8080' out/scratch.json
+          ! grep -q 'network sampling unavailable' out/scratch.json
+          ! grep -q 'privilege sampling unavailable' out/scratch.json
+      - name: Compare with reusable action
+        id: action-smoke
+        uses: ./
+        with:
+          baseline: wabi-demo/payment-api:v1
+          candidate: wabi-demo/payment-api:v2
+          scenario: examples/payment-api/scenario.json
+          target: examples/payment-api/compose.yaml
+          service: payment-api
+          fail-on: never
+      - name: Assert action output
+        env:
+          WABI_STATUS: ${{ steps.action-smoke.outputs.status }}
+        run: test "$WABI_STATUS" = "breaking"
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: workload-abi-demo
+          path: out/
