@@ -1,0 +1,6 @@
+FROM python:3.13-alpine
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY app.py /app/app.py
+EXPOSE 8080 9090
+CMD ["python", "/app/app.py"]
