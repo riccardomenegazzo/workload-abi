@@ -7,9 +7,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/riccardomenegazzo/workload-abi/internal/compat"
 	"github.com/riccardomenegazzo/workload-abi/internal/diff"
 	"github.com/riccardomenegazzo/workload-abi/internal/docker"
 	"github.com/riccardomenegazzo/workload-abi/internal/report"
+	"github.com/riccardomenegazzo/workload-abi/internal/target"
 )
 
 var version = "dev"
@@ -38,6 +40,8 @@ func runCompare(args []string) int {
 	observe := fs.Duration("observe", 2*time.Second, "observation window for each container")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON")
 	failOnChange := fs.Bool("fail-on-change", false, "exit with status 3 when any runtime change is found")
+	targetFile := fs.String("target", "", "Docker Compose file used as the target environment")
+	service := fs.String("service", "", "Compose service to evaluate (required when the file contains multiple services)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -67,6 +71,15 @@ func runCompare(args []string) int {
 	}
 
 	comparison := diff.Compare(base, candidate)
+	if *targetFile != "" {
+		t, err := target.LoadCompose(ctx, *targetFile, *service)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "target:", err)
+			return 1
+		}
+		comparison = compat.ApplyCompose(comparison, base, candidate, t)
+	}
+
 	if *jsonOut {
 		_ = report.JSON(os.Stdout, comparison)
 	} else {
@@ -120,6 +133,9 @@ Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
   wabi record  [flags] IMAGE
   wabi version
+
+Target-aware comparison:
+  wabi compare --target compose.yaml --service api BASELINE CANDIDATE
 
 Exit codes for compare:
   0  compatible/no fatal error
