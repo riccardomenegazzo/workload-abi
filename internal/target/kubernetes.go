@@ -212,6 +212,7 @@ func parseKubernetesSize(s string) int64 {
 				return int64(v * u.mul)
 			}
 		}
+	}
 	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
 }
