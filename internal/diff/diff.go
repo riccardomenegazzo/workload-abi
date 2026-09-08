@@ -39,7 +39,9 @@ func Compare(base, candidate model.Snapshot) model.Comparison {
 
 	sort.SliceStable(c.Changes, func(i, j int) bool {
 		if rank(c.Changes[i].Severity) == rank(c.Changes[j].Severity) {
-			if c.Changes[i].Surface == c.Changes[j].Surface { return c.Changes[i].Message < c.Changes[j].Message }
+			if c.Changes[i].Surface == c.Changes[j].Surface {
+				return c.Changes[i].Message < c.Changes[j].Message
+			}
 			return c.Changes[i].Surface < c.Changes[j].Surface
 		}
 		return rank(c.Changes[i].Severity) > rank(c.Changes[j].Severity)
@@ -53,25 +55,44 @@ func add(c *model.Comparison, ch model.Change) {
 	case "breaking":
 		c.Verdict = "BREAKING"
 	case "warning":
-		if c.Verdict == "COMPATIBLE" { c.Verdict = "CHANGED" }
+		if c.Verdict == "COMPATIBLE" {
+			c.Verdict = "CHANGED"
+		}
 	case "info":
-		if c.Verdict == "COMPATIBLE" { c.Verdict = "CHANGED" }
+		if c.Verdict == "COMPATIBLE" {
+			c.Verdict = "CHANGED"
+		}
 	}
 }
 
 func rank(s string) int {
-	switch s { case "breaking": return 3; case "warning": return 2; default: return 1 }
+	switch s {
+	case "breaking":
+		return 3
+	case "warning":
+		return 2
+	default:
+		return 1
+	}
 }
 
 func processSet(ps []model.Process) map[string]struct{} {
 	m := map[string]struct{}{}
-	for _, p := range ps { if p.Command != "" { m[p.Command] = struct{}{} } }
+	for _, p := range ps {
+		if p.Command != "" {
+			m[p.Command] = struct{}{}
+		}
+	}
 	return m
 }
 
 func stringSet(xs []string) map[string]struct{} {
 	m := map[string]struct{}{}
-	for _, x := range xs { if x != "" { m[x] = struct{}{} } }
+	for _, x := range xs {
+		if x != "" {
+			m[x] = struct{}{}
+		}
+	}
 	return m
 }
 
@@ -91,8 +112,12 @@ func compareSet(c *model.Comparison, surface string, before, after map[string]st
 func compareFS(c *model.Comparison, before, after []model.FilesystemChange) {
 	b := map[string]string{}
 	a := map[string]string{}
-	for _, x := range before { b[x.Path] = x.Kind }
-	for _, x := range after { a[x.Path] = x.Kind }
+	for _, x := range before {
+		b[x.Path] = x.Kind
+	}
+	for _, x := range after {
+		a[x.Path] = x.Kind
+	}
 	for path, kind := range a {
 		if old, ok := b[path]; !ok {
 			add(c, model.Change{Surface: "filesystem", Kind: "added", After: kind + " " + path, Severity: "warning", Message: "new filesystem mutation observed: " + kind + " " + path})
@@ -108,11 +133,15 @@ func compareFS(c *model.Comparison, before, after []model.FilesystemChange) {
 }
 
 func compareScalar(c *model.Comparison, surface, key, before, after, severity string) {
-	if before == after { return }
+	if before == after {
+		return
+	}
 	add(c, model.Change{Surface: surface, Kind: "changed", Before: before, After: after, Severity: severity, Message: key + " changed"})
 }
 
 func compareSlice(c *model.Comparison, surface, key string, before, after []string, severity string) {
-	if strings.Join(before, "\x00") == strings.Join(after, "\x00") { return }
+	if strings.Join(before, "\x00") == strings.Join(after, "\x00") {
+		return
+	}
 	add(c, model.Change{Surface: surface, Kind: "changed", Before: strings.Join(before, " "), After: strings.Join(after, " "), Severity: severity, Message: key + " changed"})
 }
