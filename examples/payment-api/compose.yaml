@@ -1,0 +1,12 @@
+services:
+  payment-api:
+    image: wabi-demo/payment-api:v2
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    mem_limit: 64m
+    stop_grace_period: 5s
+    ports:
+      - "8080:8080"
