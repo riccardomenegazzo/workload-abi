@@ -11,6 +11,7 @@ import (
 	"github.com/riccardomenegazzo/workload-abi/internal/diff"
 	"github.com/riccardomenegazzo/workload-abi/internal/docker"
 	"github.com/riccardomenegazzo/workload-abi/internal/report"
+	"github.com/riccardomenegazzo/workload-abi/internal/scenario"
 	"github.com/riccardomenegazzo/workload-abi/internal/target"
 )
 
@@ -42,12 +43,19 @@ func runCompare(args []string) int {
 	failOnChange := fs.Bool("fail-on-change", false, "exit with status 3 when any runtime change is found")
 	targetFile := fs.String("target", "", "Docker Compose file used as the target environment")
 	service := fs.String("service", "", "Compose service to evaluate (required when the file contains multiple services)")
+	scenarioFile := fs.String("scenario", "", "JSON scenario applied identically to both releases")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE")
 		return 2
+	}
+
+	opts, err := recorderOptions(*observe, *scenarioFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "scenario:", err)
+		return 1
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), *observe*2+2*time.Minute)
@@ -59,12 +67,12 @@ func runCompare(args []string) int {
 		return 1
 	}
 
-	base, err := r.Collect(ctx, fs.Arg(0), *observe)
+	base, err := r.CollectWithOptions(ctx, fs.Arg(0), opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "baseline:", err)
 		return 1
 	}
-	candidate, err := r.Collect(ctx, fs.Arg(1), *observe)
+	candidate, err := r.CollectWithOptions(ctx, fs.Arg(1), opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "candidate:", err)
 		return 1
@@ -98,6 +106,7 @@ func runCompare(args []string) int {
 func runRecord(args []string) int {
 	fs := flag.NewFlagSet("record", flag.ContinueOnError)
 	observe := fs.Duration("observe", 2*time.Second, "observation window")
+	scenarioFile := fs.String("scenario", "", "JSON scenario applied to the workload")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -105,6 +114,13 @@ func runRecord(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: wabi record [flags] IMAGE")
 		return 2
 	}
+
+	opts, err := recorderOptions(*observe, *scenarioFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "scenario:", err)
+		return 1
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), *observe+time.Minute)
 	defer cancel()
 	r := docker.NewRecorder()
@@ -112,7 +128,7 @@ func runRecord(args []string) int {
 		fmt.Fprintln(os.Stderr, "wabi:", err)
 		return 1
 	}
-	snapshot, err := r.Collect(ctx, fs.Arg(0), *observe)
+	snapshot, err := r.CollectWithOptions(ctx, fs.Arg(0), opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "wabi:", err)
 		return 1
@@ -124,6 +140,20 @@ func runRecord(args []string) int {
 	return 0
 }
 
+func recorderOptions(observe time.Duration, scenarioFile string) (docker.Options, error) {
+	opts := docker.Options{Observe: observe}
+	if scenarioFile == "" {
+		return opts, nil
+	}
+	s, err := scenario.Load(scenarioFile)
+	if err != nil {
+		return opts, err
+	}
+	opts.Environment = s.EnvList()
+	opts.Command = append([]string(nil), s.Command...)
+	return opts, nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `Workload ABI (wabi)
 
@@ -133,6 +163,9 @@ Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
   wabi record  [flags] IMAGE
   wabi version
+
+Equivalent experiment:
+  wabi compare --scenario scenario.json BASELINE CANDIDATE
 
 Target-aware comparison:
   wabi compare --target compose.yaml --service api BASELINE CANDIDATE
