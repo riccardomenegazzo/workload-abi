@@ -1,0 +1,7 @@
+{
+  "name": "same-environment",
+  "environment": {
+    "WABI_DEMO": "1",
+    "APP_MODE": "compatibility-test"
+  }
+}
