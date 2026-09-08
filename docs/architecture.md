@@ -1,69 +1,120 @@
 # Architecture
 
-Workload ABI separates collection from compatibility semantics so that deeper runtime observers can be introduced without changing the CLI or report model.
+Workload ABI separates **evidence collection**, **normalization**, **comparison**, **target solving**, and **policy**. The normalized snapshot is the stable boundary: deeper observers can be added without coupling compatibility semantics to one runtime sensor.
 
 ## Pipeline
 
 ```text
-image A ---------------------> Docker recorder ------------------+
-                                                                |
-                                                                v
-                                                         Snapshot A
-                                                                |
-                                                                +-----> Semantic diff -----> Verdict
-                                                                |
-                                                         Snapshot B
-                                                                ^
-                                                                |
-image B ---------------------> Docker recorder ------------------+
+                         scenario
+                            |
+             +--------------+--------------+
+             |                             |
+         image A                         image B
+             |                             |
+             v                             v
+      Docker experiment             Docker experiment
+             |                             |
+             v                             v
+        Snapshot A                    Snapshot B
+             |                             |
+             +--------------+--------------+
+                            |
+                      semantic diff
+                            |
+                   +--------+--------+
+                   |                 |
+             target solver       policy gate
+          Compose / Kubernetes       |
+                   +--------+--------+
+                            |
+                            v
+                 compatibility verdict
+                   /        |        \
+              human        JSON      SARIF
 ```
 
-## Snapshot model
+## Evidence schema
 
-The v0.1 snapshot records:
+The current schema is `wabi.dev/v1alpha2`. A snapshot records:
 
-- image identity and capture timestamp;
+- immutable image identity and configuration;
+- experiment/scenario provenance;
 - observed process commands;
 - filesystem mutations relative to the image layer;
-- image user, entrypoint, command, working directory, stop signal, exposed ports, and healthcheck;
-- container privilege/capability/resource configuration;
-- container exit status;
-- startup and shutdown timings;
-- point-in-time Docker stats.
+- runtime TCP listeners when container procfs is readable;
+- Docker network mode and attached networks;
+- scenario-step commands, bounded output, duration, exit code, success and allowed-failure state;
+- runtime privilege/capability/resource configuration;
+- startup/shutdown lifecycle measurements;
+- point-in-time Docker stats;
+- optional-surface collection warnings;
+- a stable SHA-256 operational-evidence fingerprint.
 
-Collection failures for optional surfaces are recorded as warnings instead of discarding the entire experiment. This is important for short-lived or minimal images where `docker top` or `docker stats` can legitimately become unavailable before collection finishes.
+The fingerprint deliberately excludes volatile measurements such as capture timestamps, CPU percentages and exact lifecycle timings. It is intended to identify the normalized operational contract, not a noisy telemetry sample.
+
+## Equivalent experiment engine
+
+A scenario is applied identically to baseline and candidate. It can define environment variables, a command override and ordered `docker exec` steps with delays, timeouts and allowed-failure semantics.
+
+Step outcomes are first-class evidence. A required step that succeeds for the baseline and fails for the candidate is a directly demonstrated compatibility regression and therefore `BREAKING`.
 
 ## Semantic diff
 
-The diff engine does not compare raw JSON. Each surface is normalized into stable sets or scalar facts first. Changes are classified as:
+Raw JSON is not diffed. Each evidence surface is normalized first. Changes use three default severities:
 
-- `info`: operational difference with low default risk;
-- `warning`: a potentially relevant compatibility difference;
-- `breaking`: a difference that demonstrates failure or a materially expanded execution requirement.
+- `info`: low-risk operational difference;
+- `warning`: potentially relevant contract change;
+- `breaking`: demonstrated failure or expanded requirement that violates a known invariant.
 
-The current breaking rules are intentionally conservative. v0.1 only marks evidence as breaking where the tool has direct evidence (for example, a candidate that fails under the same workflow). Future environment-aware analysis will be able to prove more incompatibilities.
+Current surfaces include processes, files, image ports, runtime listeners, network metadata, image configuration, capabilities, lifecycle and scenario outcomes.
 
-## Why Docker primitives first
+## Target solvers
 
-A full eBPF recorder is a major subsystem. Starting with Docker-native primitives provides a useful vertical slice immediately while keeping the architecture ready for deeper backends.
+Target solvers answer a different question from the semantic diff: **does the candidate evidence conflict with the environment where the workload is expected to run?**
 
-The recorder interface will evolve toward independent observation providers:
+### Docker Compose
+
+Compose is normalized with `docker compose config --format json`. The solver currently evaluates read-only rootfs/writable mounts, memory limits, shutdown grace periods and capability constraints.
+
+### Kubernetes
+
+Kubernetes JSON manifests are parsed natively; YAML is rendered to JSON with `kubectl --dry-run=client` when available. Supported workload kinds are Pod, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob.
+
+Current constraints include:
+
+- `readOnlyRootFilesystem` and writable volume mounts;
+- memory limits;
+- `terminationGracePeriodSeconds`;
+- `runAsNonRoot` / `runAsUser`;
+- dropped capabilities;
+- privilege-escalation restrictions.
+
+## Policy gate
+
+Policy is deliberately applied after evidence and target solving. A policy can require scenario/target context, reject severities, surfaces or change kinds, and enforce a maximum change count.
+
+A policy failure is not hidden state: it is appended to the result as explicit `policy-violation` evidence and promotes the verdict to `BREAKING`.
+
+## Recorder evolution
+
+Docker-native primitives provide the portable vertical slice. The intended deeper architecture is provider-oriented:
 
 ```text
 Recorder
 ├── Docker metadata
 ├── process observer
 ├── filesystem observer
-├── network observer
+├── network/DNS observer
+├── syscall/capability observer
 ├── kernel observer
 └── lifecycle observer
 ```
 
-The normalized snapshot remains the boundary between collection and comparison.
+The next major recorder depth is eBPF. That should enrich the same snapshot boundary rather than replace compatibility semantics.
 
-## Planned causal graph
+## Causal graph direction
 
-The longer-term model is not a flat allow-list. It is a causal runtime graph:
+The longer-term evidence model can evolve from flat normalized sets into a causal runtime graph:
 
 ```text
 workload
@@ -77,38 +128,14 @@ workload
   +-- listened --> port
 ```
 
-Comparing two graph versions makes it possible to express differences such as "the main process now spawns a helper that reads a credential and connects to a new domain", rather than three unrelated events.
+This enables explanations such as “the main process now spawns a helper that reads a credential and connects to a new domain” instead of three unrelated events.
 
-## Target environment solver
+## Supply-chain direction
 
-The next major layer consumes deployment constraints from Docker Compose first, followed by Kubernetes and other runtimes.
-
-Conceptually:
-
-```text
-candidate operational requirements
-                 X
-target environment constraints
-                 =
-compatibility result
-```
-
-Examples include:
-
-- new writable paths against a read-only root filesystem;
-- new capabilities against `cap_drop: ALL`;
-- new ports against network policy;
-- higher memory requirements against hard limits;
-- shutdown regressions against termination grace periods.
+The stable evidence fingerprint is the anchor for future OCI-linked Workload ABI attestations and signing. The attestation layer is intentionally downstream of runtime observation so signed artifacts describe evidence actually measured during a defined experiment.
 
 ## Non-goals
 
-Workload ABI is not intended to become:
+Workload ABI is not an SBOM generator, vulnerability scanner, generic container sandbox, attack simulator, or replacement for runtime security products.
 
-- an SBOM generator;
-- a vulnerability scanner;
-- a generic container sandbox;
-- an attack simulator;
-- a replacement for runtime security tools.
-
-It consumes runtime evidence to answer a different question: **did this release change its operational interface, and does that change matter to the environment where it will run?**
+Its question remains narrow: **did this release change its operational interface, and does that change matter to the environment where it will run?**
