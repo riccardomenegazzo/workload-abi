@@ -9,3 +9,27 @@ func TestEnvListIsDeterministic(t *testing.T) {
 		t.Fatalf("unexpected env list: %#v", got)
 	}
 }
+
+func TestPlansNormalizeDefaults(t *testing.T) {
+	s := Spec{Steps: []Step{{Exec: []string{"true"}}}}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := s.Plans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 || plans[0].Name != "step-1" || plans[0].Timeout <= 0 {
+		t.Fatalf("unexpected plans: %#v", plans)
+	}
+}
+
+func TestValidateRejectsDuplicateNames(t *testing.T) {
+	s := Spec{Steps: []Step{
+		{Name: "probe", Exec: []string{"true"}},
+		{Name: "probe", Exec: []string{"true"}},
+	}}
+	if err := s.Validate(); err == nil {
+		t.Fatal("expected duplicate step name error")
+	}
+}

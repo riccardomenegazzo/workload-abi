@@ -4,42 +4,94 @@
 
 Workload ABI (`wabi`) is an experimental, vendor-neutral tool for discovering **operational breaking changes** between container releases.
 
-It executes two container images under equivalent conditions, captures their observable runtime behavior, normalizes that behavior into a workload snapshot, and reports the semantic differences that may matter to production.
+It runs two container images under equivalent conditions, records their observable runtime behavior, normalizes that behavior into a versioned workload snapshot, compares the two snapshots, and can then prove whether a change violates a real deployment target or an explicit compatibility policy.
 
 ## Why
 
-Software already has contracts for source APIs, binary ABIs, package dependencies, SBOMs, signatures, and provenance. What is usually missing is a compatibility model for the *operational interface* between a workload and its environment.
+Software already has contracts for source APIs, binary ABIs, package dependencies, SBOMs, signatures, and provenance. What is usually missing is a compatibility model for the **operational interface** between a workload and its environment.
 
 A patch release can keep the same HTTP API and still:
 
 - spawn a new helper process;
+- listen on a new runtime port;
 - mutate new filesystem paths;
-- expose a new port;
 - change its runtime user or entrypoint;
 - require additional capabilities;
-- fail under the same startup workflow;
-- take materially longer to terminate.
+- fail one step of the same smoke workflow;
+- exceed the target memory or shutdown budget;
+- stop satisfying a read-only-rootfs or `runAsNonRoot` constraint.
 
-Those are operational changes. `wabi` makes them visible and can already test a subset of them against Docker Compose deployment constraints.
+Those are operational changes. `wabi` makes them observable, comparable, policy-enforceable, and target-aware.
 
 ## What works now
 
-- Docker image orchestration through the local Docker Engine;
-- immutable image provenance/configuration capture separated from experiment-container state;
-- process snapshot collection with `docker top`;
-- filesystem mutation collection with `docker diff`;
-- CPU/memory/network/block-I/O snapshot collection with `docker stats`;
-- startup/shutdown lifecycle timings;
-- deterministic semantic diffing;
-- JSON scenario files that apply identical environment/command inputs to both releases;
-- Docker Compose target rendering via `docker compose config --format json`;
-- target-aware checks for read-only filesystems, writable mounts, memory limits, shutdown grace periods, and capability constraints;
-- scenario and target provenance in reports;
-- human-readable and JSON reports;
-- CI-safe exit codes;
-- unit/race tests, vet, build, and real Docker end-to-end gates.
+### Runtime evidence
 
-This is **not yet** a complete eBPF-based behavioral ABI. Deep network flows, syscall requirements, kernel interactions, richer stimuli, Kubernetes environment solving, and OCI attestations remain roadmap items.
+- Docker-backed experiment orchestration;
+- immutable image provenance/configuration separated from temporary container state;
+- process snapshots via `docker top`;
+- filesystem mutations via `docker diff`;
+- CPU/memory/network/block-I/O snapshots via `docker stats`;
+- runtime TCP listener discovery from container procfs when available;
+- Docker network mode and attached-network capture;
+- startup/shutdown lifecycle timing;
+- schema-versioned snapshots;
+- stable SHA-256 evidence fingerprints that exclude volatile timing/stat measurements.
+
+### Equivalent experiments
+
+Scenario files can apply the same:
+
+- environment variables;
+- command override;
+- ordered multi-step `docker exec` workflow;
+- per-step delay;
+- per-step timeout;
+- allowed-failure semantics.
+
+Each step records its command, duration, exit code, success state, bounded output, and error. A baseline-success → candidate-failure regression becomes `BREAKING`.
+
+### Target solving
+
+Docker Compose targets are rendered with `docker compose config --format json` and checked for:
+
+- read-only root filesystems and writable mounts;
+- memory limits;
+- shutdown grace periods;
+- dropped capabilities.
+
+Kubernetes targets support:
+
+- `Pod`;
+- `Deployment`;
+- `StatefulSet`;
+- `DaemonSet`;
+- `ReplicaSet`;
+- `Job`;
+- `CronJob`.
+
+Kubernetes JSON manifests are parsed natively. YAML manifests are normalized through `kubectl --dry-run=client` when `kubectl` is available.
+
+Current Kubernetes checks cover:
+
+- `readOnlyRootFilesystem`;
+- writable volume mounts;
+- memory limits;
+- `terminationGracePeriodSeconds`;
+- `runAsNonRoot` / `runAsUser`;
+- dropped capabilities;
+- privilege-escalation constraints.
+
+### CI policy and output
+
+- `COMPATIBLE`, `CHANGED`, and `BREAKING` verdicts;
+- human-readable output;
+- JSON output;
+- SARIF 2.1.0 output;
+- explicit JSON policy files;
+- CI-safe exit codes;
+- strict `gofmt`, `go vet`, race tests, build gate, and real Docker end-to-end tests;
+- cross-platform release workflow for Linux, macOS, and Windows on amd64/arm64.
 
 ## Install
 
@@ -47,7 +99,8 @@ Requirements:
 
 - Go 1.23+
 - Docker Engine / Docker Desktop
-- Docker Compose v2 for `--target` analysis
+- Docker Compose v2 for Compose target analysis
+- `kubectl` only when a Kubernetes target is YAML rather than JSON
 
 ```bash
 git clone https://github.com/riccardomenegazzo/workload-abi.git
@@ -60,43 +113,61 @@ The CLI is built at `./bin/wabi`.
 ## Compare two releases
 
 ```bash
-./bin/wabi compare nginx:1.26 nginx:1.27
+./bin/wabi compare app:v1 app:v2
 ```
 
-Increase the observation window when needed:
+Increase the minimum experiment window:
 
 ```bash
 ./bin/wabi compare --observe 5s app:v1 app:v2
 ```
 
-Machine-readable output:
+JSON:
 
 ```bash
-./bin/wabi compare --json app:v1 app:v2
+./bin/wabi compare --format json app:v1 app:v2
 ```
 
-Fail CI whenever *any* operational change is found:
+SARIF:
+
+```bash
+./bin/wabi compare --format sarif app:v1 app:v2 > wabi.sarif
+```
+
+Fail CI whenever any operational change is found:
 
 ```bash
 ./bin/wabi compare --fail-on-change app:v1 app:v2
 ```
 
-## Run the same experiment against both releases
+## Multi-step scenarios
 
-A comparison is only useful when both releases receive equivalent inputs. A scenario supplies deterministic environment variables and, optionally, a command override:
+Example:
 
 ```json
 {
-  "name": "compatibility-smoke",
+  "name": "checkout-smoke",
   "environment": {
-    "APP_MODE": "production-like",
-    "FEATURE_X": "enabled"
+    "APP_MODE": "production-like"
   },
-  "command": ["serve", "--port", "8080"]
+  "steps": [
+    {
+      "name": "verify-config",
+      "after": "100ms",
+      "exec": ["sh", "-c", "test \"$APP_MODE\" = production-like"],
+      "timeout": "2s"
+    },
+    {
+      "name": "health-probe",
+      "after": "250ms",
+      "exec": ["sh", "-c", "wget -qO- http://127.0.0.1:8080/health"],
+      "timeout": "3s"
+    }
+  ]
 }
 ```
 
-Run it against both releases:
+Run the same experiment against both releases:
 
 ```bash
 ./bin/wabi compare \
@@ -104,9 +175,9 @@ Run it against both releases:
   app:v1 app:v2
 ```
 
-The scenario name is preserved in JSON and human-readable results so the experiment can be reproduced and audited.
+If a required step succeeds in the baseline and fails in the candidate, the comparison becomes `BREAKING`.
 
-## Check a real Docker Compose target
+## Docker Compose target
 
 ```bash
 ./bin/wabi compare \
@@ -116,100 +187,163 @@ The scenario name is preserved in JSON and human-readable results so the experim
   app:v1 app:v2
 ```
 
-If the Compose file contains one service, `--service` can be omitted.
+Auto-detection recognizes Compose files containing `services:`.
 
-The target solver currently detects conflicts such as:
+## Kubernetes target
 
-```text
-FILESYSTEM
-  ~ [BREAKING] candidate introduces a new filesystem mutation outside
-    writable Compose mounts while read_only is enabled
+JSON is parsed without any external dependency:
 
-LIFECYCLE
-  ~ [BREAKING] observed shutdown duration exceeds Compose stop_grace_period
-
-----------------------------------------------------------------
-RUNTIME COMPATIBILITY: BREAKING
+```bash
+./bin/wabi compare \
+  --scenario scenario.json \
+  --target deployment.json \
+  --target-kind kubernetes \
+  --container api \
+  app:v1 app:v2
 ```
 
-This is the key distinction between a runtime diff and Workload ABI: **a change only becomes operationally breaking when there is evidence that it conflicts with the environment where the workload is expected to run.**
+For YAML:
+
+```bash
+./bin/wabi compare \
+  --scenario scenario.json \
+  --target deployment.yaml \
+  --workload payments \
+  --container api \
+  app:v1 app:v2
+```
+
+When `--target-kind auto` is used, Workload ABI distinguishes Compose and Kubernetes targets from their structure.
+
+## Policy gate
+
+Example policy:
+
+```json
+{
+  "name": "production",
+  "require_scenario": true,
+  "require_target": true,
+  "deny_severities": ["warning"],
+  "deny_surfaces": ["privilege"],
+  "deny_kinds": ["target-conflict"],
+  "max_changes": 10
+}
+```
+
+Apply it:
+
+```bash
+./bin/wabi compare \
+  --scenario scenario.json \
+  --target compose.yaml \
+  --policy policy.json \
+  app:v1 app:v2
+```
+
+Policy violations are represented as explicit `policy-violation` evidence and promote the verdict to `BREAKING`.
+
+## Record one workload snapshot
+
+```bash
+./bin/wabi record \
+  --observe 3s \
+  --scenario scenario.json \
+  app:v2 > snapshot.json
+```
+
+A snapshot includes:
+
+- schema version;
+- image ID;
+- scenario provenance;
+- stable evidence fingerprint;
+- process/file/listener/network evidence;
+- scenario-step outcomes;
+- image/runtime configuration;
+- lifecycle measurements;
+- point-in-time runtime stats;
+- collection warnings.
+
+## Fingerprints
+
+Workload ABI computes a SHA-256 fingerprint over the normalized operational contract. Volatile values such as capture time, exact CPU percentage, and lifecycle durations are deliberately excluded.
+
+This gives future OCI attestations a stable payload anchor without pretending that noisy point-in-time telemetry is deterministic.
 
 ## Exit codes
 
 - `0`: no fatal error;
 - `3`: changes found with `--fail-on-change`;
-- `4`: a breaking runtime regression or target conflict was detected;
-- `1/2`: execution or usage error.
+- `4`: breaking runtime, scenario, target, or policy regression;
+- `1`: execution/runtime error;
+- `2`: CLI usage error.
 
-## Record one workload snapshot
-
-```bash
-./bin/wabi record --observe 3s --scenario scenario.json nginx:1.27 > snapshot.json
-```
-
-The snapshot records image identity, experiment provenance, observed runtime facts, and collection warnings.
-
-## Example report
+## Example result
 
 ```text
 WORKLOAD ABI
 ================================================================
 payment-api:1.8.3 -> payment-api:1.8.4
-scenario: compatibility-smoke
-target:   compose:compose.yaml#api
+baseline fingerprint:  sha256:...
+candidate fingerprint: sha256:...
+scenario: checkout-smoke
+target:   kubernetes:Deployment/payments#api
+policy:   production
 
-PROCESS
-  + [WARNING] new process observed: curl telemetry.example
+SCENARIO
+  ~ [BREAKING] required scenario step regressed: health-probe
+      before: health-probe exit=0
+      after:  health-probe exit=7
 
 FILESYSTEM
-  + [WARNING] new filesystem mutation observed: A /var/lib/payment/cache
-
-IMAGE-CONFIG
-  ~ [WARNING] user changed
-      before: 1000
-      after:  0
+  ~ [BREAKING] candidate introduces a new filesystem mutation outside
+      writable Kubernetes volume mounts while readOnlyRootFilesystem is enabled
 
 ----------------------------------------------------------------
-RUNTIME COMPATIBILITY: CHANGED
+RUNTIME COMPATIBILITY: BREAKING
 ```
 
 ## Design principles
 
 1. **Observe, do not guess.** Runtime evidence is first-class.
-2. **Same experiment, two releases.** Comparison is meaningful only under equivalent conditions.
-3. **Semantic differences, not log diffs.** Raw events are normalized before comparison.
+2. **Same experiment, two releases.** Comparison is meaningful only under equivalent inputs.
+3. **Semantic differences, not log diffs.** Raw evidence is normalized before comparison.
 4. **Environment-aware compatibility.** A difference and a breaking change are not the same thing.
-5. **Vendor neutral.** Docker is the first execution backend, not the project boundary.
-6. **Explainable verdicts.** A compatibility result must point to concrete evidence.
-7. **Preserve provenance.** Image identity, scenario, and target belong to the result.
-8. **Progressive depth.** Portable Docker primitives come first; eBPF/Falco/Tracee recorders can deepen evidence without replacing the compatibility model.
+5. **Policy is evidence, not a hidden switch.** Policy failures are explicit result entries.
+6. **Preserve provenance.** Image identity, fingerprints, scenario, target, and policy belong to the result.
+7. **Progressive depth.** Portable Docker evidence comes first; eBPF can deepen the recorder without replacing the compatibility model.
+8. **Machine-consumable by design.** JSON and SARIF are first-class outputs.
 
 ## Architecture
 
 ```text
-                   scenario
-                      |
-          +-----------+-----------+
-          |                       |
-      image:v1                  image:v2
-          |                       |
-          v                       v
-   runtime snapshot A      runtime snapshot B
-          |                       |
-          +-----------+-----------+
-                      |
-                semantic diff
-                      |
-                      +--------------- target environment
-                      |                   (Compose first)
-                      v
-              compatibility solver
-                      |
-                      v
-              compatibility verdict
+                         scenario
+                            |
+             +--------------+--------------+
+             |                             |
+         image:v1                       image:v2
+             |                             |
+             v                             v
+      runtime snapshot A            runtime snapshot B
+             |                             |
+             +--------------+--------------+
+                            |
+                      semantic diff
+                            |
+                   +--------+--------+
+                   |                 |
+             target solver       policy gate
+          Compose / Kubernetes       |
+                   +--------+--------+
+                            |
+                            v
+                 compatibility verdict
+                   /        |        \
+              human        JSON      SARIF
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the internal model and roadmap.
+See [`docs/architecture.md`](docs/architecture.md) for the internal model.
 
 ## Reproduce the included end-to-end proof
 
@@ -222,46 +356,43 @@ docker build -t wabi-demo:v2 ./examples/demo/v2
   --scenario ./examples/demo/scenario.json \
   --target ./examples/demo/compose.yaml \
   --service app \
+  --policy ./examples/demo/policy.json \
   wabi-demo:v1 wabi-demo:v2
 ```
 
-The candidate writes under `/var/lib/demo`, while the target has a read-only root filesystem and only `/tmp` is writable. Workload ABI therefore proves a target-specific operational incompatibility and exits with code `4`.
+The candidate writes under `/var/lib/demo`, while the target has a read-only root filesystem and only `/tmp` is writable. Workload ABI proves the target-specific incompatibility and exits with code `4`.
+
+## Release artifacts
+
+Pushing a `v*` tag builds and publishes:
+
+- Linux amd64/arm64;
+- macOS amd64/arm64;
+- Windows amd64/arm64;
+- SHA-256 checksums.
+
+The version is embedded into the binary:
+
+```bash
+wabi version
+```
 
 ## Roadmap
 
-### Richer deterministic scenarios
+The remaining depth is intentionally concentrated in evidence collection rather than CLI surface area:
 
-- repeatable HTTP requests and health probes;
-- mounted fixtures and request traces;
-- multiple scenario phases (startup, steady-state, shutdown);
-- normalization to eliminate incidental runtime noise.
-
-### Deeper target solving
-
-- richer Compose volume/port/resource semantics;
-- Kubernetes Deployment/Pod/Helm constraints;
-- seccomp/AppArmor/NetworkPolicy compatibility.
-
-### Deep runtime recorder
-
-- eBPF process/file/network observation;
-- syscall and capability requirements;
+- eBPF process/file/network/syscall recorder;
 - DNS and outbound dependency graph;
-- causal runtime graph.
-
-### Supply-chain artifact
-
-- OCI-linked runtime compatibility attestation;
-- Sigstore signing;
-- CI/CD policy integration.
-
-### Operational ABI 1.0
-
-A stable compatibility model for the operational interface between a workload release and its execution environment.
+- syscall/capability requirement inference;
+- seccomp/AppArmor/NetworkPolicy solving;
+- Helm-rendered Kubernetes targets;
+- causal runtime graph;
+- OCI-linked Workload ABI attestations;
+- Sigstore signing and verification.
 
 ## Status
 
-Workload ABI is an early-stage research/engineering project. The current implementation is intentionally conservative: it reports evidence it can explain and only calls a target conflict breaking when it can prove the constraint violation.
+Workload ABI is an early-stage research/engineering project. The current implementation is intentionally conservative: it reports evidence it can explain and calls a target or policy conflict breaking only when it has a concrete reason.
 
 ## License
 

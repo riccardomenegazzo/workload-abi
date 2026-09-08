@@ -3,5 +3,19 @@
   "environment": {
     "WABI_DEMO": "1",
     "APP_MODE": "compatibility-test"
-  }
+  },
+  "steps": [
+    {
+      "name": "verify-environment",
+      "after": "100ms",
+      "exec": ["sh", "-c", "test \"$APP_MODE\" = compatibility-test"],
+      "timeout": "2s"
+    },
+    {
+      "name": "write-probe",
+      "after": "50ms",
+      "exec": ["sh", "-c", "echo scenario-ok >/tmp/wabi-scenario-probe"],
+      "timeout": "2s"
+    }
+  ]
 }

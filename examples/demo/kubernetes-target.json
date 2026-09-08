@@ -1,0 +1,27 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {"name": "demo"},
+  "spec": {
+    "template": {
+      "spec": {
+        "terminationGracePeriodSeconds": 2,
+        "securityContext": {"runAsNonRoot": true},
+        "containers": [
+          {
+            "name": "app",
+            "image": "wabi-demo:v2",
+            "securityContext": {
+              "readOnlyRootFilesystem": true,
+              "allowPrivilegeEscalation": false,
+              "capabilities": {"drop": ["ALL"]}
+            },
+            "resources": {"limits": {"memory": "128Mi"}},
+            "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}]
+          }
+        ],
+        "volumes": [{"name": "tmp", "emptyDir": {}}]
+      }
+    }
+  }
+}
