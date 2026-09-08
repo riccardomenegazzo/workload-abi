@@ -317,5 +317,6 @@ func ParseBytes(s string) int64 {
 				return int64(v * u.mul)
 			}
 		}
+	}
 	return 0
 }
