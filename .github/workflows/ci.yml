@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit / Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.23.x', '1.24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build ./cmd/wabi
+
+  integration:
+    name: Docker end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Build CLI
+        run: make build
+      - name: Build demo images
+        run: make demo-build
+      - name: Compare API-compatible releases
+        run: |
+          mkdir -p out
+          ./bin/wabi compare wabi-demo/payment-api:v1 wabi-demo/payment-api:v2 \
+            --scenario examples/payment-api/scenario.json \
+            --target examples/payment-api/compose.yaml \
+            --service payment-api \
+            --graphs-dir out/graphs \
+            --json out/result.json \
+            --fail-on never
+      - name: Assert breaking compatibility
+        run: grep -q '"status": "breaking"' out/result.json
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: workload-abi-demo
+          path: out/
