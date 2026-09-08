@@ -8,13 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/riccardomenegazzo/workload-abi/internal/attest"
 	"github.com/riccardomenegazzo/workload-abi/internal/compat"
 	"github.com/riccardomenegazzo/workload-abi/internal/diff"
 	"github.com/riccardomenegazzo/workload-abi/internal/docker"
+	"github.com/riccardomenegazzo/workload-abi/internal/doctor"
 	"github.com/riccardomenegazzo/workload-abi/internal/model"
 	"github.com/riccardomenegazzo/workload-abi/internal/policy"
 	"github.com/riccardomenegazzo/workload-abi/internal/report"
 	"github.com/riccardomenegazzo/workload-abi/internal/scenario"
+	"github.com/riccardomenegazzo/workload-abi/internal/snapshot"
 	"github.com/riccardomenegazzo/workload-abi/internal/target"
 )
 
@@ -31,6 +34,14 @@ func main() {
 		os.Exit(runCompare(os.Args[2:]))
 	case "record":
 		os.Exit(runRecord(os.Args[2:]))
+	case "compare-snapshots":
+		os.Exit(runCompareSnapshots(os.Args[2:]))
+	case "attest":
+		os.Exit(runAttest(os.Args[2:]))
+	case "verify-attestation":
+		os.Exit(runVerifyAttestation(os.Args[2:]))
+	case "doctor":
+		os.Exit(runDoctor(os.Args[2:]))
 	case "version", "--version", "-v":
 		fmt.Println("wabi", version)
 	default:
@@ -168,6 +179,179 @@ func runRecord(args []string) int {
 	return 0
 }
 
+func runCompareSnapshots(args []string) int {
+	fs := flag.NewFlagSet("compare-snapshots", flag.ContinueOnError)
+	outputFormat := fs.String("format", "human", "output format: human, json, or sarif")
+	jsonOut := fs.Bool("json", false, "deprecated alias for --format json")
+	failOnChange := fs.Bool("fail-on-change", false, "exit with status 3 when any change is found")
+	targetFile := fs.String("target", "", "target environment file (Docker Compose or Kubernetes)")
+	targetKind := fs.String("target-kind", "auto", "target type: auto, compose, or kubernetes")
+	service := fs.String("service", "", "Compose service to evaluate")
+	workload := fs.String("workload", "", "Kubernetes workload to evaluate")
+	containerName := fs.String("container", "", "Kubernetes container to evaluate")
+	policyFile := fs.String("policy", "", "JSON compatibility policy")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json")
+		return 2
+	}
+	format, err := resolveFormat(*outputFormat, *jsonOut)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "wabi:", err)
+		return 2
+	}
+	base, err := snapshot.Load(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "baseline snapshot:", err)
+		return 1
+	}
+	candidate, err := snapshot.Load(fs.Arg(1))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "candidate snapshot:", err)
+		return 1
+	}
+	if base.Scenario != candidate.Scenario {
+		fmt.Fprintf(os.Stderr, "wabi: snapshots were recorded under different scenarios (%q vs %q)\n", base.Scenario, candidate.Scenario)
+		return 1
+	}
+
+	comparison := diff.Compare(base, candidate)
+	comparison.Scenario = base.Scenario
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if *targetFile != "" {
+		comparison, err = applyTarget(ctx, comparison, base, candidate, *targetFile, *targetKind, *service, *workload, *containerName)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "target:", err)
+			return 1
+		}
+	}
+	if *policyFile != "" {
+		p, err := policy.Load(*policyFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "policy:", err)
+			return 1
+		}
+		comparison = policy.Apply(comparison, p)
+	}
+	if err := writeComparison(os.Stdout, format, comparison); err != nil {
+		fmt.Fprintln(os.Stderr, "wabi:", err)
+		return 1
+	}
+	if comparison.Verdict == "BREAKING" {
+		return 4
+	}
+	if *failOnChange && len(comparison.Changes) > 0 {
+		return 3
+	}
+	return 0
+}
+
+func runAttest(args []string) int {
+	fs := flag.NewFlagSet("attest", flag.ContinueOnError)
+	output := fs.String("output", "", "write attestation to a file instead of stdout")
+	predicateOnly := fs.Bool("predicate-only", false, "emit only the Workload ABI predicate for external signing tools")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: wabi attest [--output FILE] COMPARISON.json")
+		return 2
+	}
+	comparison, err := attest.LoadComparison(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "attest:", err)
+		return 1
+	}
+	statement, err := attest.New(comparison)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "attest:", err)
+		return 1
+	}
+	out := os.Stdout
+	if *output != "" {
+		f, err := os.Create(*output)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "attest:", err)
+			return 1
+		}
+		defer f.Close()
+		out = f
+	}
+	var value any = statement
+	if *predicateOnly {
+		value = statement.Predicate
+	}
+	if err := report.JSON(out, value); err != nil {
+		fmt.Fprintln(os.Stderr, "attest:", err)
+		return 1
+	}
+	return 0
+}
+
+func runVerifyAttestation(args []string) int {
+	fs := flag.NewFlagSet("verify-attestation", flag.ContinueOnError)
+	expected := fs.String("candidate-fingerprint", "", "expected candidate SHA-256 operational fingerprint")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: wabi verify-attestation [flags] ATTESTATION.json")
+		return 2
+	}
+	statement, err := attest.LoadStatement(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "verify-attestation:", err)
+		return 1
+	}
+	if err := attest.Verify(statement, *expected); err != nil {
+		fmt.Fprintln(os.Stderr, "verify-attestation:", err)
+		return 1
+	}
+	fmt.Printf("verified: %s %s\n", statement.Predicate.Comparison.Candidate, statement.Predicate.Comparison.CandidateFingerprint)
+	return 0
+}
+
+func runDoctor(args []string) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "emit machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: wabi doctor [--json]")
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result := doctor.Run(ctx)
+	if *jsonOut {
+		if err := report.JSON(os.Stdout, result); err != nil {
+			return 1
+		}
+		return 0
+	}
+	for _, check := range result.Checks {
+		status := "MISSING"
+		if check.Available {
+			status = "OK"
+		}
+		fmt.Printf("%-16s %-7s %s\n", check.Component, status, firstNonEmpty(check.Version, check.Error))
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func recorderOptions(observe time.Duration, scenarioFile string) (docker.ExperimentOptions, string, time.Duration, error) {
 	opts := docker.ExperimentOptions{Observe: observe}
 	if scenarioFile == "" {
@@ -269,7 +453,11 @@ Discover operational breaking changes between container releases.
 
 Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
-  wabi record  [flags] IMAGE
+  wabi record            [flags] IMAGE
+  wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
+  wabi attest            [flags] COMPARISON.json
+  wabi verify-attestation [flags] ATTESTATION.json
+  wabi doctor            [--json]
   wabi version
 
 Equivalent multi-phase experiment:
