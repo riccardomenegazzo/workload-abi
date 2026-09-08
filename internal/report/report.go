@@ -18,22 +18,41 @@ func JSON(w io.Writer, v any) error {
 func Human(w io.Writer, c model.Comparison) error {
 	fmt.Fprintln(w, "WORKLOAD ABI")
 	fmt.Fprintln(w, strings.Repeat("=", 64))
-	fmt.Fprintf(w, "%s -> %s\n\n", c.Baseline, c.Candidate)
+	fmt.Fprintf(w, "%s -> %s\n", c.Baseline, c.Candidate)
+	if c.Scenario != "" {
+		fmt.Fprintf(w, "scenario: %s\n", c.Scenario)
+	}
+	if c.Target != "" {
+		fmt.Fprintf(w, "target:   %s\n", c.Target)
+	}
+	fmt.Fprintln(w)
+
 	if len(c.Changes) == 0 {
 		fmt.Fprintln(w, "No operational differences observed under this run.")
 	} else {
 		current := ""
 		for _, ch := range c.Changes {
 			if ch.Surface != current {
-				if current != "" { fmt.Fprintln(w) }
+				if current != "" {
+					fmt.Fprintln(w)
+				}
 				current = ch.Surface
 				fmt.Fprintln(w, strings.ToUpper(current))
 			}
 			marker := "+"
-			switch ch.Kind { case "removed": marker = "-"; case "changed", "regression", "expanded": marker = "~" }
+			switch ch.Kind {
+			case "removed":
+				marker = "-"
+			case "changed", "regression", "expanded", "target-conflict":
+				marker = "~"
+			}
 			fmt.Fprintf(w, "  %s [%s] %s\n", marker, strings.ToUpper(ch.Severity), ch.Message)
-			if ch.Before != "" { fmt.Fprintf(w, "      before: %s\n", ch.Before) }
-			if ch.After != "" { fmt.Fprintf(w, "      after:  %s\n", ch.After) }
+			if ch.Before != "" {
+				fmt.Fprintf(w, "      before: %s\n", ch.Before)
+			}
+			if ch.After != "" {
+				fmt.Fprintf(w, "      after:  %s\n", ch.After)
+			}
 		}
 	}
 	fmt.Fprintln(w)
