@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Format check
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+
+  docker-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build wabi
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Build demo images
+        run: |
+          docker build -t wabi-demo:v1 ./examples/demo/v1
+          docker build -t wabi-demo:v2 ./examples/demo/v2
+      - name: Prove target-aware breaking change
+        shell: bash
+        run: |
+          set +e
+          ./bin/wabi compare \
+            --observe 500ms \
+            --scenario ./examples/demo/scenario.json \
+            --target ./examples/demo/compose.yaml \
+            --service app \
+            --json \
+            wabi-demo:v1 wabi-demo:v2 > /tmp/wabi-report.json
+          code=$?
+          set -e
+
+          cat /tmp/wabi-report.json
+          test "$code" -eq 4
+          grep -q '"scenario": "same-environment"' /tmp/wabi-report.json
+          grep -q '"verdict": "BREAKING"' /tmp/wabi-report.json
+          grep -q 'target-conflict' /tmp/wabi-report.json
