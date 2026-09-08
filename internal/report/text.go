@@ -19,7 +19,9 @@ func CompareText(w io.Writer, r model.CompareResult) {
 		for _, c := range r.Diff.Changes {
 			surface := strings.ToUpper(c.Surface)
 			if surface != current {
-				if current != "" { fmt.Fprintln(w) }
+				if current != "" {
+					fmt.Fprintln(w)
+				}
 				fmt.Fprintln(w, surface)
 				current = surface
 			}
@@ -33,12 +35,16 @@ func CompareText(w io.Writer, r model.CompareResult) {
 		fmt.Fprintln(w, "\nTARGET COMPATIBILITY")
 		fmt.Fprintln(w, strings.Repeat("─", 64))
 		fmt.Fprintf(w, "Environment: %s", c.Environment)
-		if c.Service != "" { fmt.Fprintf(w, " (service: %s)", c.Service) }
+		if c.Service != "" {
+			fmt.Fprintf(w, " (service: %s)", c.Service)
+		}
 		fmt.Fprintln(w)
 		for _, x := range c.Conflicts {
 			fmt.Fprintf(w, "  %s %-10s %s\n      constraint: %s\n      observed:   %s\n", symbol(x.Severity), strings.ToUpper(x.Surface), x.Explanation, x.Constraint, x.Observed)
 		}
-		for _, n := range c.Notes { fmt.Fprintf(w, "  · %s\n", n) }
+		for _, n := range c.Notes {
+			fmt.Fprintf(w, "  · %s\n", n)
+		}
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "RUNTIME COMPATIBILITY: %s\n", strings.ToUpper(string(c.Status)))
 	}
@@ -46,9 +52,13 @@ func CompareText(w io.Writer, r model.CompareResult) {
 
 func symbol(s model.ChangeSeverity) string {
 	switch s {
-	case model.SeverityCritical: return "✗"
-	case model.SeverityHigh: return "!"
-	case model.SeverityMedium: return "△"
-	default: return "·"
+	case model.SeverityCritical:
+		return "✗"
+	case model.SeverityHigh:
+		return "!"
+	case model.SeverityMedium:
+		return "△"
+	default:
+		return "·"
 	}
 }
