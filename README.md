@@ -25,19 +25,21 @@ Those are operational changes. `wabi` makes them visible and can already test a 
 ## What works now
 
 - Docker image orchestration through the local Docker Engine;
+- immutable image provenance/configuration capture separated from experiment-container state;
 - process snapshot collection with `docker top`;
 - filesystem mutation collection with `docker diff`;
-- image/runtime configuration capture with `docker inspect`;
 - CPU/memory/network/block-I/O snapshot collection with `docker stats`;
 - startup/shutdown lifecycle timings;
 - deterministic semantic diffing;
+- JSON scenario files that apply identical environment/command inputs to both releases;
 - Docker Compose target rendering via `docker compose config --format json`;
 - target-aware checks for read-only filesystems, writable mounts, memory limits, shutdown grace periods, and capability constraints;
+- scenario and target provenance in reports;
 - human-readable and JSON reports;
 - CI-safe exit codes;
-- unit/race tests, vet, and build gates.
+- unit/race tests, vet, build, and real Docker end-to-end gates.
 
-This is **not yet** a complete eBPF-based behavioral ABI. Deep network flows, syscall requirements, kernel interactions, deterministic workload stimuli, Kubernetes environment solving, and OCI attestations remain roadmap items.
+This is **not yet** a complete eBPF-based behavioral ABI. Deep network flows, syscall requirements, kernel interactions, richer stimuli, Kubernetes environment solving, and OCI attestations remain roadmap items.
 
 ## Install
 
@@ -79,10 +81,36 @@ Fail CI whenever *any* operational change is found:
 ./bin/wabi compare --fail-on-change app:v1 app:v2
 ```
 
+## Run the same experiment against both releases
+
+A comparison is only useful when both releases receive equivalent inputs. A scenario supplies deterministic environment variables and, optionally, a command override:
+
+```json
+{
+  "name": "compatibility-smoke",
+  "environment": {
+    "APP_MODE": "production-like",
+    "FEATURE_X": "enabled"
+  },
+  "command": ["serve", "--port", "8080"]
+}
+```
+
+Run it against both releases:
+
+```bash
+./bin/wabi compare \
+  --scenario scenario.json \
+  app:v1 app:v2
+```
+
+The scenario name is preserved in JSON and human-readable results so the experiment can be reproduced and audited.
+
 ## Check a real Docker Compose target
 
 ```bash
 ./bin/wabi compare \
+  --scenario scenario.json \
   --target compose.yaml \
   --service api \
   app:v1 app:v2
@@ -94,11 +122,11 @@ The target solver currently detects conflicts such as:
 
 ```text
 FILESYSTEM
-  + [BREAKING] candidate introduces a new filesystem mutation outside
+  ~ [BREAKING] candidate introduces a new filesystem mutation outside
     writable Compose mounts while read_only is enabled
 
 LIFECYCLE
-  + [BREAKING] observed shutdown duration exceeds Compose stop_grace_period
+  ~ [BREAKING] observed shutdown duration exceeds Compose stop_grace_period
 
 ----------------------------------------------------------------
 RUNTIME COMPATIBILITY: BREAKING
@@ -116,10 +144,10 @@ This is the key distinction between a runtime diff and Workload ABI: **a change 
 ## Record one workload snapshot
 
 ```bash
-./bin/wabi record --observe 3s nginx:1.27 > snapshot.json
+./bin/wabi record --observe 3s --scenario scenario.json nginx:1.27 > snapshot.json
 ```
 
-The snapshot is designed to become a stable, versioned input for compatibility analysis.
+The snapshot records image identity, experiment provenance, observed runtime facts, and collection warnings.
 
 ## Example report
 
@@ -127,6 +155,8 @@ The snapshot is designed to become a stable, versioned input for compatibility a
 WORKLOAD ABI
 ================================================================
 payment-api:1.8.3 -> payment-api:1.8.4
+scenario: compatibility-smoke
+target:   compose:compose.yaml#api
 
 PROCESS
   + [WARNING] new process observed: curl telemetry.example
@@ -151,41 +181,59 @@ RUNTIME COMPATIBILITY: CHANGED
 4. **Environment-aware compatibility.** A difference and a breaking change are not the same thing.
 5. **Vendor neutral.** Docker is the first execution backend, not the project boundary.
 6. **Explainable verdicts.** A compatibility result must point to concrete evidence.
-7. **Progressive depth.** Portable Docker primitives come first; eBPF/Falco/Tracee recorders can deepen evidence without replacing the compatibility model.
+7. **Preserve provenance.** Image identity, scenario, and target belong to the result.
+8. **Progressive depth.** Portable Docker primitives come first; eBPF/Falco/Tracee recorders can deepen evidence without replacing the compatibility model.
 
 ## Architecture
 
 ```text
-             equivalent observation workflow
-                        |
-          +-------------+-------------+
-          |                           |
-      image:v1                      image:v2
-          |                           |
-          v                           v
-   runtime snapshot A          runtime snapshot B
-          |                           |
-          +-------------+-------------+
-                        |
-                  semantic diff
-                        |
-                        +---------------- target environment
-                        |                    (Compose first)
-                        v
+                   scenario
+                      |
+          +-----------+-----------+
+          |                       |
+      image:v1                  image:v2
+          |                       |
+          v                       v
+   runtime snapshot A      runtime snapshot B
+          |                       |
+          +-----------+-----------+
+                      |
+                semantic diff
+                      |
+                      +--------------- target environment
+                      |                   (Compose first)
+                      v
               compatibility solver
-                        |
-                        v
+                      |
+                      v
               compatibility verdict
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the internal model and roadmap.
 
+## Reproduce the included end-to-end proof
+
+```bash
+docker build -t wabi-demo:v1 ./examples/demo/v1
+docker build -t wabi-demo:v2 ./examples/demo/v2
+
+./bin/wabi compare \
+  --observe 500ms \
+  --scenario ./examples/demo/scenario.json \
+  --target ./examples/demo/compose.yaml \
+  --service app \
+  wabi-demo:v1 wabi-demo:v2
+```
+
+The candidate writes under `/var/lib/demo`, while the target has a read-only root filesystem and only `/tmp` is writable. Workload ABI therefore proves a target-specific operational incompatibility and exits with code `4`.
+
 ## Roadmap
 
-### Deterministic scenarios
+### Richer deterministic scenarios
 
-- repeatable HTTP/CLI stimuli;
-- environment variables, mounts, and command overrides;
+- repeatable HTTP requests and health probes;
+- mounted fixtures and request traces;
+- multiple scenario phases (startup, steady-state, shutdown);
 - normalization to eliminate incidental runtime noise.
 
 ### Deeper target solving
@@ -213,7 +261,7 @@ A stable compatibility model for the operational interface between a workload re
 
 ## Status
 
-Workload ABI is an early-stage research/engineering project. The semantics will evolve as the recorder becomes deeper and deterministic scenario execution is introduced.
+Workload ABI is an early-stage research/engineering project. The current implementation is intentionally conservative: it reports evidence it can explain and only calls a target conflict breaking when it can prove the constraint violation.
 
 ## License
 
