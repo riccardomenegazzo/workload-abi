@@ -2,18 +2,24 @@ package model
 
 import "time"
 
+const SchemaVersion = "wabi.dev/v1alpha2"
+
 type Snapshot struct {
-	Image       string             `json:"image"`
-	ImageID     string             `json:"image_id,omitempty"`
-	Scenario    string             `json:"scenario,omitempty"`
-	CapturedAt  time.Time          `json:"captured_at"`
-	Processes   []Process          `json:"processes,omitempty"`
-	Filesystem  []FilesystemChange `json:"filesystem,omitempty"`
-	ImageConfig ImageConfig        `json:"image_config"`
-	Runtime     RuntimeFacts       `json:"runtime"`
-	Lifecycle   Lifecycle          `json:"lifecycle"`
-	Stats       Stats              `json:"stats,omitempty"`
-	Warnings    []string           `json:"warnings,omitempty"`
+	SchemaVersion string               `json:"schema_version"`
+	Image         string               `json:"image"`
+	ImageID       string               `json:"image_id,omitempty"`
+	Scenario      string               `json:"scenario,omitempty"`
+	Fingerprint   string               `json:"fingerprint,omitempty"`
+	CapturedAt    time.Time            `json:"captured_at"`
+	Processes     []Process            `json:"processes,omitempty"`
+	Filesystem    []FilesystemChange   `json:"filesystem,omitempty"`
+	Listeners     []Listener           `json:"listeners,omitempty"`
+	ScenarioSteps []ScenarioStepResult `json:"scenario_steps,omitempty"`
+	ImageConfig   ImageConfig          `json:"image_config"`
+	Runtime       RuntimeFacts         `json:"runtime"`
+	Lifecycle     Lifecycle            `json:"lifecycle"`
+	Stats         Stats                `json:"stats,omitempty"`
+	Warnings      []string             `json:"warnings,omitempty"`
 }
 
 type Process struct {
@@ -23,6 +29,22 @@ type Process struct {
 type FilesystemChange struct {
 	Kind string `json:"kind"`
 	Path string `json:"path"`
+}
+
+type Listener struct {
+	Protocol string `json:"protocol"`
+	Port     int    `json:"port"`
+}
+
+type ScenarioStepResult struct {
+	Name         string        `json:"name"`
+	Command      []string      `json:"command"`
+	ExitCode     int           `json:"exit_code"`
+	Success      bool          `json:"success"`
+	AllowFailure bool          `json:"allow_failure,omitempty"`
+	Duration     time.Duration `json:"duration"`
+	Output       string        `json:"output,omitempty"`
+	Error        string        `json:"error,omitempty"`
 }
 
 type ImageConfig struct {
@@ -45,6 +67,8 @@ type RuntimeFacts struct {
 	PidsLimit       int64    `json:"pids_limit,omitempty"`
 	ContainerStatus string   `json:"container_status,omitempty"`
 	ExitCode        int      `json:"exit_code,omitempty"`
+	NetworkMode     string   `json:"network_mode,omitempty"`
+	Networks        []string `json:"networks,omitempty"`
 }
 
 type Lifecycle struct {
@@ -70,10 +94,14 @@ type Change struct {
 }
 
 type Comparison struct {
-	Baseline  string   `json:"baseline"`
-	Candidate string   `json:"candidate"`
-	Scenario  string   `json:"scenario,omitempty"`
-	Target    string   `json:"target,omitempty"`
-	Verdict   string   `json:"verdict"`
-	Changes   []Change `json:"changes"`
+	SchemaVersion        string   `json:"schema_version"`
+	Baseline             string   `json:"baseline"`
+	Candidate            string   `json:"candidate"`
+	BaselineFingerprint  string   `json:"baseline_fingerprint,omitempty"`
+	CandidateFingerprint string   `json:"candidate_fingerprint,omitempty"`
+	Scenario             string   `json:"scenario,omitempty"`
+	Target               string   `json:"target,omitempty"`
+	Policy               string   `json:"policy,omitempty"`
+	Verdict              string   `json:"verdict"`
+	Changes              []Change `json:"changes"`
 }
