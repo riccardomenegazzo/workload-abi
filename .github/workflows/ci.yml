@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -40,7 +41,7 @@ jobs:
         run: make build
       - name: Build demo images
         run: make demo-build
-      - name: Compare API-compatible releases
+      - name: Compare API-compatible releases with CLI
         run: |
           mkdir -p out
           ./bin/wabi compare wabi-demo/payment-api:v1 wabi-demo/payment-api:v2 \
@@ -57,6 +58,20 @@ jobs:
           ! grep -q '172.17.0.1' out/result.json
           ! grep -q '"path": "/var"' out/result.json
           ! grep -q '"path": "/var/lib"' out/result.json
+      - name: Compare with reusable action
+        id: action-smoke
+        uses: ./
+        with:
+          baseline: wabi-demo/payment-api:v1
+          candidate: wabi-demo/payment-api:v2
+          scenario: examples/payment-api/scenario.json
+          target: examples/payment-api/compose.yaml
+          service: payment-api
+          fail-on: never
+      - name: Assert action output
+        env:
+          WABI_STATUS: ${{ steps.action-smoke.outputs.status }}
+        run: test "$WABI_STATUS" = "breaking"
       - name: Upload evidence
         uses: actions/upload-artifact@v4
         with:
