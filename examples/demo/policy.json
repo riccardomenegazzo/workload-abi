@@ -1,0 +1,7 @@
+{
+  "name": "production-like",
+  "require_scenario": true,
+  "require_target": true,
+  "deny_surfaces": ["privilege"],
+  "deny_kinds": ["target-conflict"]
+}
