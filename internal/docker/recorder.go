@@ -18,6 +18,12 @@ type Recorder struct {
 	binary string
 }
 
+type Options struct {
+	Observe     time.Duration
+	Environment []string
+	Command     []string
+}
+
 func NewRecorder() *Recorder { return &Recorder{binary: "docker"} }
 
 func (r *Recorder) Check(ctx context.Context) error {
@@ -44,6 +50,10 @@ func (r *Recorder) Pull(ctx context.Context, image string) error {
 }
 
 func (r *Recorder) Collect(ctx context.Context, image string, observe time.Duration) (model.Snapshot, error) {
+	return r.CollectWithOptions(ctx, image, Options{Observe: observe})
+}
+
+func (r *Recorder) CollectWithOptions(ctx context.Context, image string, opts Options) (model.Snapshot, error) {
 	var snap model.Snapshot
 	snap.Image = image
 	snap.CapturedAt = time.Now().UTC()
@@ -53,7 +63,14 @@ func (r *Recorder) Collect(ctx context.Context, image string, observe time.Durat
 	}
 
 	name := fmt.Sprintf("wabi-%d", time.Now().UnixNano())
-	create := exec.CommandContext(ctx, r.binary, "create", "--name", name, image)
+	createArgs := []string{"create", "--name", name}
+	for _, env := range opts.Environment {
+		createArgs = append(createArgs, "--env", env)
+	}
+	createArgs = append(createArgs, image)
+	createArgs = append(createArgs, opts.Command...)
+
+	create := exec.CommandContext(ctx, r.binary, createArgs...)
 	out, err := create.CombinedOutput()
 	if err != nil {
 		return snap, fmt.Errorf("create container: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -72,8 +89,8 @@ func (r *Recorder) Collect(ctx context.Context, image string, observe time.Durat
 	}
 	snap.Lifecycle.StartDuration = time.Since(started)
 
-	if observe > 0 {
-		t := time.NewTimer(observe)
+	if opts.Observe > 0 {
+		t := time.NewTimer(opts.Observe)
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -118,15 +135,17 @@ func (r *Recorder) Collect(ctx context.Context, image string, observe time.Durat
 }
 
 type inspectPayload struct {
-	ID string `json:"Id"`
+	ID     string `json:"Id"`
 	Config struct {
-		User         string              `json:"User"`
-		Entrypoint   []string            `json:"Entrypoint"`
-		Cmd          []string            `json:"Cmd"`
-		WorkingDir   string              `json:"WorkingDir"`
-		StopSignal   string              `json:"StopSignal"`
-		ExposedPorts map[string]any      `json:"ExposedPorts"`
-		Healthcheck  *struct{ Test []string `json:"Test"` } `json:"Healthcheck"`
+		User         string         `json:"User"`
+		Entrypoint   []string       `json:"Entrypoint"`
+		Cmd          []string       `json:"Cmd"`
+		WorkingDir   string         `json:"WorkingDir"`
+		StopSignal   string         `json:"StopSignal"`
+		ExposedPorts map[string]any `json:"ExposedPorts"`
+		Healthcheck  *struct {
+			Test []string `json:"Test"`
+		} `json:"Healthcheck"`
 	} `json:"Config"`
 	HostConfig struct {
 		Privileged     bool     `json:"Privileged"`
@@ -230,7 +249,9 @@ func (r *Recorder) filesystem(ctx context.Context, id string) ([]model.Filesyste
 		result = append(result, model.FilesystemChange{Kind: parts[0], Path: parts[1]})
 	}
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Path == result[j].Path { return result[i].Kind < result[j].Kind }
+		if result[i].Path == result[j].Path {
+			return result[i].Kind < result[j].Kind
+		}
 		return result[i].Path < result[j].Path
 	})
 	return result, nil
@@ -257,7 +278,10 @@ func (r *Recorder) stats(ctx context.Context, id string) (model.Stats, error) {
 
 func ParseBytes(s string) int64 {
 	s = strings.TrimSpace(strings.ToLower(s))
-	units := []struct{ suffix string; mul float64 }{
+	units := []struct {
+		suffix string
+		mul    float64
+	}{
 		{"gib", 1024 * 1024 * 1024}, {"gb", 1000 * 1000 * 1000},
 		{"mib", 1024 * 1024}, {"mb", 1000 * 1000},
 		{"kib", 1024}, {"kb", 1000}, {"b", 1},
@@ -265,8 +289,9 @@ func ParseBytes(s string) int64 {
 	for _, u := range units {
 		if strings.HasSuffix(s, u.suffix) {
 			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, u.suffix)), 64)
-			if err == nil { return int64(v * u.mul) }
+			if err == nil {
+				return int64(v * u.mul)
+			}
 		}
-	}
 	return 0
 }
