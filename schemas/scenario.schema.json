@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/scenario-v1alpha1.json",
+  "title": "Workload ABI Scenario",
+  "type": "object",
+  "required": ["name"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "command": {"type": "array", "items": {"type": "string"}},
+    "environment": {"type": "object", "additionalProperties": {"type": "string"}},
+    "publish_ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}, "uniqueItems": true},
+    "settle_ms": {"type": "integer", "minimum": 0},
+    "observation_ms": {"type": "integer", "minimum": 1},
+    "sample_interval_ms": {"type": "integer", "minimum": 1},
+    "shutdown_timeout_ms": {"type": "integer", "minimum": 1},
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["port"],
+        "additionalProperties": false,
+        "properties": {
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "method": {"type": "string"},
+          "path": {"type": "string"},
+          "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+          "body": {"type": "string"},
+          "expect_status": {"type": "integer", "minimum": 100, "maximum": 599},
+          "repeat": {"type": "integer", "minimum": 1},
+          "interval_ms": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}
