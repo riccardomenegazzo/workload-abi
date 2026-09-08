@@ -19,8 +19,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Normalize formatting
-        run: gofmt -w ./cmd ./internal
+      - name: Format check
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -50,6 +57,7 @@ jobs:
           set +e
           ./bin/wabi compare \
             --observe 500ms \
+            --scenario ./examples/demo/scenario.json \
             --target ./examples/demo/compose.yaml \
             --service app \
             --json \
@@ -59,5 +67,6 @@ jobs:
 
           cat /tmp/wabi-report.json
           test "$code" -eq 4
+          grep -q '"scenario": "same-environment"' /tmp/wabi-report.json
           grep -q '"verdict": "BREAKING"' /tmp/wabi-report.json
           grep -q 'target-conflict' /tmp/wabi-report.json
