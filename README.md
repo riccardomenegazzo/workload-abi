@@ -20,11 +20,9 @@ A patch release can keep the same HTTP API and still:
 - fail under the same startup workflow;
 - take materially longer to terminate.
 
-Those are operational changes. `wabi` makes them visible.
+Those are operational changes. `wabi` makes them visible and can already test a subset of them against Docker Compose deployment constraints.
 
-## Current v0.1
-
-The first implementation intentionally starts small and measurable:
+## What works now
 
 - Docker image orchestration through the local Docker Engine;
 - process snapshot collection with `docker top`;
@@ -33,10 +31,13 @@ The first implementation intentionally starts small and measurable:
 - CPU/memory/network/block-I/O snapshot collection with `docker stats`;
 - startup/shutdown lifecycle timings;
 - deterministic semantic diffing;
+- Docker Compose target rendering via `docker compose config --format json`;
+- target-aware checks for read-only filesystems, writable mounts, memory limits, shutdown grace periods, and capability constraints;
 - human-readable and JSON reports;
-- CI-safe exit codes.
+- CI-safe exit codes;
+- unit/race tests, vet, and build gates.
 
-This is **not yet** a complete eBPF-based behavioral ABI. Network flows, syscall requirements, kernel interactions, deterministic workload stimuli, Compose/Kubernetes environment solving, and OCI attestations are roadmap items.
+This is **not yet** a complete eBPF-based behavioral ABI. Deep network flows, syscall requirements, kernel interactions, deterministic workload stimuli, Kubernetes environment solving, and OCI attestations remain roadmap items.
 
 ## Install
 
@@ -44,6 +45,7 @@ Requirements:
 
 - Go 1.23+
 - Docker Engine / Docker Desktop
+- Docker Compose v2 for `--target` analysis
 
 ```bash
 git clone https://github.com/riccardomenegazzo/workload-abi.git
@@ -77,11 +79,38 @@ Fail CI whenever *any* operational change is found:
 ./bin/wabi compare --fail-on-change app:v1 app:v2
 ```
 
-Exit codes:
+## Check a real Docker Compose target
+
+```bash
+./bin/wabi compare \
+  --target compose.yaml \
+  --service api \
+  app:v1 app:v2
+```
+
+If the Compose file contains one service, `--service` can be omitted.
+
+The target solver currently detects conflicts such as:
+
+```text
+FILESYSTEM
+  + [BREAKING] candidate introduces a new filesystem mutation outside
+    writable Compose mounts while read_only is enabled
+
+LIFECYCLE
+  + [BREAKING] observed shutdown duration exceeds Compose stop_grace_period
+
+----------------------------------------------------------------
+RUNTIME COMPATIBILITY: BREAKING
+```
+
+This is the key distinction between a runtime diff and Workload ABI: **a change only becomes operationally breaking when there is evidence that it conflicts with the environment where the workload is expected to run.**
+
+## Exit codes
 
 - `0`: no fatal error;
 - `3`: changes found with `--fail-on-change`;
-- `4`: a breaking runtime regression was detected;
+- `4`: a breaking runtime regression or target conflict was detected;
 - `1/2`: execution or usage error.
 
 ## Record one workload snapshot
@@ -90,7 +119,7 @@ Exit codes:
 ./bin/wabi record --observe 3s nginx:1.27 > snapshot.json
 ```
 
-The snapshot is designed to become a stable, versioned input for future compatibility analysis.
+The snapshot is designed to become a stable, versioned input for compatibility analysis.
 
 ## Example report
 
@@ -119,9 +148,10 @@ RUNTIME COMPATIBILITY: CHANGED
 1. **Observe, do not guess.** Runtime evidence is first-class.
 2. **Same experiment, two releases.** Comparison is meaningful only under equivalent conditions.
 3. **Semantic differences, not log diffs.** Raw events are normalized before comparison.
-4. **Vendor neutral.** Docker is the first execution backend, not the project boundary.
-5. **Explainable verdicts.** A compatibility result must point to concrete evidence.
-6. **Progressive depth.** v0.1 uses portable Docker primitives; later recorders can add eBPF/Falco/Tracee without changing the model.
+4. **Environment-aware compatibility.** A difference and a breaking change are not the same thing.
+5. **Vendor neutral.** Docker is the first execution backend, not the project boundary.
+6. **Explainable verdicts.** A compatibility result must point to concrete evidence.
+7. **Progressive depth.** Portable Docker primitives come first; eBPF/Falco/Tracee recorders can deepen evidence without replacing the compatibility model.
 
 ## Architecture
 
@@ -139,6 +169,11 @@ RUNTIME COMPATIBILITY: CHANGED
                         |
                   semantic diff
                         |
+                        +---------------- target environment
+                        |                    (Compose first)
+                        v
+              compatibility solver
+                        |
                         v
               compatibility verdict
 ```
@@ -147,40 +182,38 @@ See [`docs/architecture.md`](docs/architecture.md) for the internal model and ro
 
 ## Roadmap
 
-### v0.2 — deterministic scenarios
+### Deterministic scenarios
 
 - repeatable HTTP/CLI stimuli;
 - environment variables, mounts, and command overrides;
 - normalization to eliminate incidental runtime noise.
 
-### v0.3 — target environment solver
+### Deeper target solving
 
-```bash
-wabi compare app:v1 app:v2 --target compose.yaml
-```
+- richer Compose volume/port/resource semantics;
+- Kubernetes Deployment/Pod/Helm constraints;
+- seccomp/AppArmor/NetworkPolicy compatibility.
 
-The goal is to move from **"what changed?"** to **"will this change violate the target environment?"**
-
-### v0.4 — deep runtime recorder
+### Deep runtime recorder
 
 - eBPF process/file/network observation;
 - syscall and capability requirements;
 - DNS and outbound dependency graph;
 - causal runtime graph.
 
-### v0.5 — supply-chain artifact
+### Supply-chain artifact
 
 - OCI-linked runtime compatibility attestation;
 - Sigstore signing;
 - CI/CD policy integration.
 
-### v1.0 — Operational ABI
+### Operational ABI 1.0
 
 A stable compatibility model for the operational interface between a workload release and its execution environment.
 
 ## Status
 
-Workload ABI is an early-stage research/engineering project. The v0.1 semantics will evolve as the recorder becomes deeper and deterministic scenario execution is introduced.
+Workload ABI is an early-stage research/engineering project. The semantics will evolve as the recorder becomes deeper and deterministic scenario execution is introduced.
 
 ## License
 
