@@ -27,6 +27,22 @@ jobs:
         run: go build -trimpath -o ./bin/wabi-native ./cmd/wabi-native
       - name: Cross-build native provider for Linux ARM64
         run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/wabi-native-linux-arm64 ./cmd/wabi-native
+      - name: Prove Linux release packaging
+        shell: bash
+        env:
+          VERSION: ci
+          DIST_DIR: /tmp/wabi-release
+          WABI_RELEASE_PLATFORMS: linux/amd64 linux/arm64
+          WABI_RELEASE_INCLUDE_SCHEMAS: "false"
+        run: |
+          bash ./scripts/build-release-artifacts.sh
+          test -s /tmp/wabi-release/checksums.txt
+          for arch in amd64 arm64; do
+            archive="/tmp/wabi-release/wabi_ci_linux_${arch}.tar.gz"
+            test -s "$archive"
+            tar -tzf "$archive" | grep -q "/wabi$"
+            tar -tzf "$archive" | grep -q "/wabi-native$"
+          done
       - name: Build core CLI
         run: go build -trimpath -o ./bin/wabi ./cmd/wabi
       - name: Prepare tracefs
