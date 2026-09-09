@@ -50,9 +50,20 @@ func runRecord(args []string) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+10*time.Second)
 	defer cancel()
-	result, err := nativeebpf.Record(ctx, nativeebpf.Options{Duration: *duration, MaxEvents: *maxEvents})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "wabi-native:", err)
+	result, recordErr := nativeebpf.Record(ctx, nativeebpf.Options{Duration: *duration, MaxEvents: *maxEvents})
+	if err := writeStats(*statsOutput, result.Stats); err != nil {
+		fmt.Fprintln(os.Stderr, "wabi-native stats:", err)
+		return 1
+	}
+	if recordErr != nil {
+		fmt.Fprintln(os.Stderr, "wabi-native:", recordErr)
+		for _, probe := range result.Stats.Probes {
+			if probe.Available {
+				fmt.Fprintf(os.Stderr, "wabi-native probe %s: attached\n", probe.Name)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "wabi-native probe %s: %s\n", probe.Name, probe.Error)
+		}
 		return 1
 	}
 
@@ -71,21 +82,22 @@ func runRecord(args []string) int {
 		return 1
 	}
 
-	if *statsOutput != "" {
-		f, err := os.Create(*statsOutput)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "wabi-native stats:", err)
-			return 1
-		}
-		defer f.Close()
-		if err := report.JSON(f, result.Stats); err != nil {
-			fmt.Fprintln(os.Stderr, "wabi-native stats:", err)
-			return 1
-		}
-	} else {
+	if *statsOutput == "" {
 		fmt.Fprintf(os.Stderr, "wabi-native: captured=%d lost_samples=%d probes=%d\n", result.Stats.Captured, result.Stats.LostSamples, len(result.Stats.Probes))
 	}
 	return 0
+}
+
+func writeStats(path string, stats nativeebpf.Stats) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return report.JSON(f, stats)
 }
 
 func usage() {
