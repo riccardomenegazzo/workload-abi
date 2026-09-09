@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/graph/v1alpha1/graph-diff.schema.json",
+  "title": "Workload ABI Causal Runtime Graph Diff",
+  "type": "object",
+  "required": ["schema_version", "baseline_fingerprint", "candidate_fingerprint", "verdict", "changes"],
+  "properties": {
+    "schema_version": {"const": "wabi.graph-diff/v1alpha1"},
+    "baseline_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "candidate_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "verdict": {"enum": ["COMPATIBLE", "CHANGED"]},
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "edge"],
+        "properties": {
+          "kind": {"enum": ["added", "removed"]},
+          "edge": {"$ref": "graph.schema.json#/$defs/edge"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "explanations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "summary", "edges"],
+        "properties": {
+          "kind": {"enum": ["new-process-chain", "new-dependency"]},
+          "summary": {"type": "string", "minLength": 1},
+          "edges": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "graph.schema.json#/$defs/edge"}
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
