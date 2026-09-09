@@ -1,0 +1,2 @@
+{"source":"custom-ebpf","category":"file","operation":"open","process":"/usr/bin/app","target":"/etc/app/config.yaml","pid":700}
+{"source":"custom-ebpf","category":"network","operation":"connect","process":"/usr/bin/app","target":"telemetry.example.com:443","protocol":"tcp","direction":"outbound","pid":700}
