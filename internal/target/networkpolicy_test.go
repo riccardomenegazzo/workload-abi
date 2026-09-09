@@ -61,14 +61,7 @@ func TestLoadKubernetesNetworkPolicyEgress(t *testing.T) {
 }
 
 func TestNetworkPolicyDefaultEgressIsolation(t *testing.T) {
-	obj := map[string]any{
-		"kind": "NetworkPolicy",
-		"metadata": map[string]any{"name": "implicit-egress"},
-		"spec": map[string]any{
-			"podSelector": map[string]any{},
-			"egress":      []any{map[string]any{}},
-		},
-	}
+	obj := map[string]any{"kind": "NetworkPolicy", "metadata": map[string]any{"name": "implicit-egress"}, "spec": map[string]any{"podSelector": map[string]any{}, "egress": []any{map[string]any{}}}}
 	p, err := parseKubernetesNetworkPolicy(obj)
 	if err != nil {
 		t.Fatal(err)
@@ -77,14 +70,7 @@ func TestNetworkPolicyDefaultEgressIsolation(t *testing.T) {
 		t.Fatal("presence of egress rules should default policyTypes to include Egress")
 	}
 
-	denyAll := map[string]any{
-		"kind": "NetworkPolicy",
-		"metadata": map[string]any{"name": "deny-all-egress"},
-		"spec": map[string]any{
-			"podSelector": map[string]any{},
-			"policyTypes": []any{"Egress"},
-		},
-	}
+	denyAll := map[string]any{"kind": "NetworkPolicy", "metadata": map[string]any{"name": "deny-all-egress"}, "spec": map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Egress"}}}
 	p, err = parseKubernetesNetworkPolicy(denyAll)
 	if err != nil {
 		t.Fatal(err)
@@ -95,13 +81,12 @@ func TestNetworkPolicyDefaultEgressIsolation(t *testing.T) {
 }
 
 func TestKubernetesLabelSelectorExpressions(t *testing.T) {
-	selector := KubernetesLabelSelector{
-		MatchLabels: map[string]string{"app": "api"},
-		MatchExpressions: []KubernetesLabelExpression{
-			{Key: "environment", Operator: "In", Values: []string{"prod", "staging"}},
-			{Key: "debug", Operator: "DoesNotExist"},
-			{Key: "owner", Operator: "Exists"},
-		},
+	selector := KubernetesLabelSelector{}
+	selector.MatchLabels = map[string]string{"app": "api"}
+	selector.MatchExpressions = []KubernetesLabelExpression{
+		{Key: "environment", Operator: "In", Values: []string{"prod", "staging"}},
+		{Key: "debug", Operator: "DoesNotExist"},
+		{Key: "owner", Operator: "Exists"},
 	}
 	if !selector.Matches(map[string]string{"app": "api", "environment": "prod", "owner": "platform"}) {
 		t.Fatal("selector should match valid labels")
