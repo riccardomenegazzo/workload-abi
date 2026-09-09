@@ -68,6 +68,7 @@ for platform in $platforms; do
   [[ "$os" == "linux" ]] || continue
 
   archive="${dist}/wabi_${version}_${os}_${arch}.tar.gz"
-  tar -tzf "$archive" | grep -q "/wabi$"
-  tar -tzf "$archive" | grep -q "/wabi-native$"
+  contents="$(tar -tzf "$archive")"
+  grep -q "/wabi$" <<<"$contents"
+  grep -q "/wabi-native$" <<<"$contents"
 done
