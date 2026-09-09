@@ -16,7 +16,11 @@ type KubernetesTarget struct {
 	File                     string
 	Kind                     string
 	Name                     string
+	Namespace                string
 	Container                string
+	PodLabels                map[string]string
+	NetworkPolicyFile        string
+	NetworkPolicies          []KubernetesNetworkPolicy
 	ReadOnlyRootfs           bool
 	RunAsNonRoot             bool
 	RunAsUser                *int64
@@ -54,6 +58,8 @@ func LoadKubernetes(ctx context.Context, file, workload, container string) (Kube
 	if t.Name == "" {
 		t.Name = workload
 	}
+	t.Namespace = defaultNamespace(stringValue(meta["namespace"]))
+	t.PodLabels = extractPodLabels(obj)
 
 	podSpec, err := extractPodSpec(obj)
 	if err != nil {
@@ -169,6 +175,26 @@ func extractPodSpec(obj map[string]any) (map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported kubernetes workload kind %q", stringValue(obj["kind"]))
 	}
+}
+
+func extractPodLabels(obj map[string]any) map[string]string {
+	kind := strings.ToLower(stringValue(obj["kind"]))
+	if kind == "pod" {
+		return stringMap(mapValue(obj["metadata"])["labels"])
+	}
+
+	spec := mapValue(obj["spec"])
+	var template map[string]any
+	switch kind {
+	case "deployment", "statefulset", "daemonset", "replicaset", "job":
+		template = mapValue(spec["template"])
+	case "cronjob":
+		jobSpec := mapValue(mapValue(spec["jobTemplate"])["spec"])
+		template = mapValue(jobSpec["template"])
+	default:
+		return map[string]string{}
+	}
+	return stringMap(mapValue(template["metadata"])["labels"])
 }
 
 func selectContainer(containers []any, name string) (map[string]any, error) {
