@@ -1,0 +1,134 @@
+name: Deployment Attestation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-attestation:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Unit proof
+        run: go test ./internal/deployattest
+
+      - name: Build wabi
+        run: go build -o ./bin/wabi ./cmd/wabi
+
+      - name: Build deterministic releases
+        run: |
+          docker build -t wabi-attest:v1 examples/demo/v1
+          docker build -t wabi-attest:v2 examples/demo/v2
+
+      - name: Record and enrich the exact evidence chain
+        run: |
+          ./bin/wabi record --observe 1s wabi-attest:v1 > baseline.json
+          ./bin/wabi record --observe 1s wabi-attest:v2 > candidate.json
+
+          ./bin/wabi enrich \
+            --snapshot baseline.json \
+            --events examples/deep/graph-baseline.jsonl \
+            --format generic \
+            --output baseline.deep.json
+
+          ./bin/wabi enrich \
+            --snapshot candidate.json \
+            --events examples/deep/graph-candidate.jsonl \
+            --format generic \
+            --output candidate.graph-events.json
+          ./bin/wabi enrich \
+            --snapshot candidate.graph-events.json \
+            --events examples/networkpolicy/candidate-events.json \
+            --format generic \
+            --output candidate.net.json
+          ./bin/wabi enrich \
+            --snapshot candidate.net.json \
+            --events examples/seccomp/candidate-syscalls.jsonl \
+            --format generic \
+            --output candidate.deep.json
+
+      - name: Build verified matrix and graphs
+        run: |
+          set +e
+          ./bin/wabi matrix \
+            --config examples/matrix/environments.json \
+            --output matrix.json \
+            baseline.deep.json candidate.deep.json > matrix.txt
+          code=$?
+          set -e
+          test "$code" -eq 4
+          ./bin/wabi verify-matrix matrix.json
+
+          ./bin/wabi graph --output baseline.graph.json baseline.deep.json
+          ./bin/wabi graph --output candidate.graph.json candidate.deep.json
+          test "$(jq -r '.snapshot_fingerprint' baseline.graph.json)" = "$(jq -r '.baseline_fingerprint' matrix.json)"
+          test "$(jq -r '.snapshot_fingerprint' candidate.graph.json)" = "$(jq -r '.candidate_fingerprint' matrix.json)"
+
+      - name: Build standalone in-toto deployment statement
+        run: |
+          OCI_DIGEST="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ./bin/wabi deployment-attest \
+            --matrix matrix.json \
+            --candidate-snapshot candidate.deep.json \
+            --baseline-graph baseline.graph.json \
+            --candidate-graph candidate.graph.json \
+            --oci-subject "ghcr.io/example/wabi-attest@${OCI_DIGEST}" \
+            --output deployment.intoto.json
+
+          test "$(jq -r '._type' deployment.intoto.json)" = "https://in-toto.io/Statement/v1"
+          test "$(jq -r '.predicateType' deployment.intoto.json)" = "https://wabi.dev/attestation/deployment/v1alpha1"
+          test "$(jq -r '.predicate.schema_version' deployment.intoto.json)" = "wabi.deployment/v1alpha1"
+          test "$(jq -r '.predicate.matrix.fingerprint' deployment.intoto.json)" = "$(jq -r '.fingerprint' matrix.json)"
+          test "$(jq -r '.predicate.candidate_graph.fingerprint' deployment.intoto.json)" = "$(jq -r '.fingerprint' candidate.graph.json)"
+          jq -e '.subject[] | select(.name=="ghcr.io/example/wabi-attest" and .digest.sha256=="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")' deployment.intoto.json
+          jq -e '.subject[] | select(.name | startswith("wabi:operational-abi:"))' deployment.intoto.json
+          jq -e '.subject[] | select(.name | startswith("wabi:environment-matrix:"))' deployment.intoto.json
+          jq -e '.subject[] | select(.name | startswith("wabi:image-config:"))' deployment.intoto.json
+          jq -e '.subject[] | select(.name | startswith("wabi:causal-graph:"))' deployment.intoto.json
+
+      - name: Verify standalone deployment statement
+        run: |
+          ./bin/wabi verify-deployment-attestation \
+            --matrix-fingerprint "$(jq -r '.fingerprint' matrix.json)" \
+            --candidate-graph-fingerprint "$(jq -r '.fingerprint' candidate.graph.json)" \
+            deployment.intoto.json
+
+      - name: Export predicate for external signing
+        run: |
+          ./bin/wabi deployment-attest \
+            --matrix matrix.json \
+            --candidate-snapshot candidate.deep.json \
+            --baseline-graph baseline.graph.json \
+            --candidate-graph candidate.graph.json \
+            --predicate-only \
+            --output deployment.predicate.json
+
+          ./bin/wabi verify-deployment-predicate \
+            --matrix-fingerprint "$(jq -r '.fingerprint' matrix.json)" \
+            --candidate-graph-fingerprint "$(jq -r '.fingerprint' candidate.graph.json)" \
+            deployment.predicate.json
+          test "$(jq -r '.matrix.verdict' deployment.predicate.json)" = "BREAKING"
+          test "$(jq -r '.candidate.operational_fingerprint' deployment.predicate.json)" = "$(jq -r '.candidate_fingerprint' matrix.json)"
+
+      - name: Prove deployment predicate tamper rejection
+        run: |
+          jq '(.matrix.environments[] | select(.name=="production-ecs") | .verdict) = "COMPATIBLE"' deployment.predicate.json > deployment.tampered.json
+          set +e
+          ./bin/wabi verify-deployment-predicate deployment.tampered.json > tamper.out 2>&1
+          code=$?
+          set -e
+          cat tamper.out
+          test "$code" -eq 1
+          grep -qi 'matrix fingerprint mismatch' tamper.out
