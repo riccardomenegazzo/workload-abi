@@ -118,7 +118,17 @@ Delivered so far:
 - ECS task/container hard `memory` limits with `memoryReservation` preserved as soft-only evidence;
 - explicit ECS `stopTimeout` proof without inventing a default when absent;
 - ECS Linux capability constraint parsing and compatibility reuse;
-- end-to-end proof that the same persisted Operational ABI can produce an ECS `filesystem / target-conflict`.
+- end-to-end proof that the same persisted Operational ABI can produce an ECS `filesystem / target-conflict`;
+- independently versioned `wabi.matrix/v1alpha1` Environment Compatibility Matrix artifact;
+- portable `wabi.matrix-config/v1alpha1` environment definitions with relative path resolution;
+- one evidence pair evaluated across Compose, Kubernetes/NetworkPolicy, ECS, seccomp and Workload ABI policy through the existing proof engines;
+- deterministic matrix fingerprint and tamper verification;
+- deployability summary distinguishing `CHANGED` from proven `BREAKING` blockers;
+- embedded `wabi dashboard` with no Node/npm/CDN dependency;
+- self-contained `dashboard.html` export for CI/offline use;
+- optional causal graph correlation with strict snapshot-fingerprint binding;
+- loopback-only dashboard serving by default, explicit `--allow-remote`, restrictive CSP and no external network dependency;
+- end-to-end CI proof that matrix, causal graphs and dashboard are derived from the same verified snapshots.
 
 Still planned:
 
@@ -141,8 +151,9 @@ Planned:
 - OCI referrer/attestation publishing;
 - Sigstore signing and verification examples;
 - image-digest + operational-fingerprint + graph-fingerprint binding;
+- matrix fingerprint binding into deployment attestations;
 - CI policy examples for GitHub Actions and other systems;
-- provenance linking scenario, target, snapshot, graph and compatibility decision.
+- provenance linking scenario, target, snapshot, graph, matrix and compatibility decision.
 
 ## 1.0 maturity criteria
 
@@ -151,12 +162,12 @@ Workload ABI should not declare a stable 1.0 specification until all of the foll
 1. snapshot/comparison schemas have a documented compatibility policy;
 2. at least two independent evidence providers can produce compatible normalized evidence;
 3. target solving supports Docker Compose, Kubernetes, and Amazon ECS with a stable rule model;
-4. persisted evidence and attestation formats have interoperability tests;
+4. persisted evidence, graph, matrix and attestation formats have interoperability tests;
 5. nondeterminism is measured and documented;
 6. the project has a corpus of reproducible compatibility scenarios;
 7. at least one external integration consumes Workload ABI output without importing internal Go packages;
 8. deep provider equivalence is tested against the same workload behavior;
 9. a native deep recorder, if shipped, uses the same public evidence model as external providers;
-10. causal graph artifacts have stable semantics and interoperability tests independent of the recorder implementation.
+10. causal graph and environment matrix artifacts have stable semantics and interoperability tests independent of recorder implementation.
 
-The goal is not feature count. The goal is a credible, portable **Operational ABI** that survives implementation and sensor changes.
+The goal is not feature count. The goal is a credible, portable **Operational ABI** that survives implementation, environment and sensor changes.

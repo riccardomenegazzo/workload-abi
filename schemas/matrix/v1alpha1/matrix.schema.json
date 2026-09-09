@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/matrix/v1alpha1/matrix.schema.json",
+  "title": "Workload ABI Environment Compatibility Matrix",
+  "type": "object",
+  "required": ["schema_version", "baseline", "candidate", "baseline_fingerprint", "candidate_fingerprint", "verdict", "summary", "environments", "fingerprint"],
+  "properties": {
+    "schema_version": {"const": "wabi.matrix/v1alpha1"},
+    "baseline": {"type": "string"},
+    "candidate": {"type": "string"},
+    "baseline_fingerprint": {"type": "string", "minLength": 1},
+    "candidate_fingerprint": {"type": "string", "minLength": 1},
+    "scenario": {"type": "string"},
+    "verdict": {"enum": ["COMPATIBLE", "CHANGED", "BREAKING"]},
+    "summary": {"$ref": "#/$defs/summary"},
+    "environments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/environmentResult"}
+    },
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "required": ["compatible", "changed", "breaking"],
+      "properties": {
+        "compatible": {"type": "integer", "minimum": 0},
+        "changed": {"type": "integer", "minimum": 0},
+        "breaking": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "environmentResult": {
+      "type": "object",
+      "required": ["name", "verdict", "changes"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "target": {"type": "string"},
+        "policy": {"type": "string"},
+        "verdict": {"enum": ["COMPATIBLE", "CHANGED", "BREAKING"]},
+        "changes": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/change"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "change": {
+      "type": "object",
+      "required": ["surface", "kind", "severity", "message"],
+      "properties": {
+        "surface": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "before": {"type": "string"},
+        "after": {"type": "string"},
+        "severity": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
