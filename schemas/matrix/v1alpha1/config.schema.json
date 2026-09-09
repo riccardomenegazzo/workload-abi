@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/matrix/v1alpha1/config.schema.json",
+  "title": "Workload ABI Environment Matrix Configuration",
+  "type": "object",
+  "required": ["schema_version", "environments"],
+  "properties": {
+    "schema_version": {"const": "wabi.matrix-config/v1alpha1"},
+    "environments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/environment"}
+    }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "target_kind": {"enum": ["auto", "compose", "kubernetes", "k8s", "ecs"]},
+        "service": {"type": "string"},
+        "workload": {"type": "string"},
+        "container": {"type": "string"},
+        "network_policy": {"type": "string", "minLength": 1},
+        "seccomp_profile": {"type": "string", "minLength": 1},
+        "policy": {"type": "string", "minLength": 1}
+      },
+      "anyOf": [
+        {"required": ["target"]},
+        {"required": ["seccomp_profile"]},
+        {"required": ["policy"]}
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
