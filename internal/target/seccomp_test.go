@@ -1,7 +1,6 @@
 package target
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -79,5 +78,3 @@ func assertSeccompDecision(t *testing.T, profile SeccompProfile, syscall string,
 		t.Fatalf("Decision(%q)=%q want %q", syscall, got, want)
 	}
 }
-
-var _ = context.Background
