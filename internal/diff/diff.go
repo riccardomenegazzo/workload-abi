@@ -22,6 +22,7 @@ func Compare(base, candidate model.Snapshot) model.Comparison {
 	compareFS(&c, base.Filesystem, candidate.Filesystem)
 	compareSet(&c, "port", stringSet(base.ImageConfig.ExposedPorts), stringSet(candidate.ImageConfig.ExposedPorts), "warning")
 	compareSet(&c, "listener", listenerSet(base.Listeners), listenerSet(candidate.Listeners), "warning")
+	compareRuntimeEvents(&c, base.RuntimeEvents, candidate.RuntimeEvents)
 	compareScalar(&c, "network", "network-mode", base.Runtime.NetworkMode, candidate.Runtime.NetworkMode, "warning")
 	compareSet(&c, "network", stringSet(base.Runtime.Networks), stringSet(candidate.Runtime.Networks), "warning")
 	compareScalar(&c, "image-config", "user", base.ImageConfig.User, candidate.ImageConfig.User, "warning")
@@ -151,6 +152,78 @@ func compareFS(c *model.Comparison, before, after []model.FilesystemChange) {
 			add(c, model.Change{Surface: "filesystem", Kind: "removed", Before: kind + " " + path, Severity: "info", Message: "filesystem mutation no longer observed: " + kind + " " + path})
 		}
 	}
+}
+
+func compareRuntimeEvents(c *model.Comparison, before, after []model.RuntimeEvent) {
+	b := runtimeEventMap(before)
+	a := runtimeEventMap(after)
+	for key, event := range a {
+		if _, ok := b[key]; ok {
+			continue
+		}
+		severity := runtimeEventSeverity(event)
+		add(c, model.Change{
+			Surface:  "runtime-" + event.Category,
+			Kind:     "runtime-event-added",
+			After:    describeRuntimeEvent(event),
+			Severity: severity,
+			Message:  "new deep runtime behavior observed: " + describeRuntimeEvent(event),
+		})
+	}
+	for key, event := range b {
+		if _, ok := a[key]; ok {
+			continue
+		}
+		add(c, model.Change{
+			Surface:  "runtime-" + event.Category,
+			Kind:     "runtime-event-removed",
+			Before:   describeRuntimeEvent(event),
+			Severity: "info",
+			Message:  "deep runtime behavior no longer observed: " + describeRuntimeEvent(event),
+		})
+	}
+}
+
+func runtimeEventMap(events []model.RuntimeEvent) map[string]model.RuntimeEvent {
+	out := map[string]model.RuntimeEvent{}
+	for _, event := range events {
+		if event.Category == "" || event.Operation == "" {
+			continue
+		}
+		out[event.SemanticKey()] = event
+	}
+	return out
+}
+
+func runtimeEventSeverity(event model.RuntimeEvent) string {
+	switch event.Category {
+	case "process", "file", "network", "security":
+		return "warning"
+	case "syscall":
+		return "info"
+	default:
+		return "info"
+	}
+}
+
+func describeRuntimeEvent(event model.RuntimeEvent) string {
+	parts := []string{event.Category + "/" + event.Operation}
+	if event.Process != "" {
+		parts = append(parts, "process="+event.Process)
+	}
+	if event.ParentProcess != "" {
+		parts = append(parts, "parent="+event.ParentProcess)
+	}
+	if event.Target != "" {
+		parts = append(parts, "target="+event.Target)
+	}
+	if event.Protocol != "" {
+		parts = append(parts, "protocol="+event.Protocol)
+	}
+	if event.Direction != "" {
+		parts = append(parts, "direction="+event.Direction)
+	}
+	return strings.Join(parts, " ")
 }
 
 func compareScenarioSteps(c *model.Comparison, before, after []model.ScenarioStepResult) {
