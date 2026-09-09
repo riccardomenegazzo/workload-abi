@@ -26,6 +26,10 @@ func main() {
 		os.Exit(runGraphDiff(os.Args[2:]))
 	case "compare-snapshots":
 		os.Exit(runCompareSnapshots(os.Args[2:]))
+	case "matrix":
+		os.Exit(runMatrix(os.Args[2:]))
+	case "verify-matrix":
+		os.Exit(runVerifyMatrix(os.Args[2:]))
 	case "attest":
 		os.Exit(runAttest(os.Args[2:]))
 	case "verify-attestation":
@@ -52,6 +56,8 @@ Commands:
   wabi graph             [--output FILE] SNAPSHOT.json
   wabi graph-diff        [--format human|json] BASELINE.graph.json CANDIDATE.graph.json
   wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
+  wabi matrix            --config ENVIRONMENTS.json [flags] BASELINE.json CANDIDATE.json
+  wabi verify-matrix     MATRIX.json
   wabi attest            [flags] COMPARISON.json
   wabi verify-attestation [flags] ATTESTATION.json
   wabi doctor            [--json]
@@ -73,6 +79,10 @@ Target-aware comparison:
   wabi compare-snapshots --target deployment.json --target-kind kubernetes --network-policy egress.json BASELINE.json CANDIDATE.json
   wabi compare-snapshots --target task-definition.json --target-kind ecs --container api BASELINE.json CANDIDATE.json
 
+Environment compatibility matrix:
+  wabi matrix --config environments.json --output matrix.json BASELINE.json CANDIDATE.json
+  wabi verify-matrix matrix.json
+
 Seccomp proof from exact syscall evidence:
   wabi compare-snapshots --seccomp-profile seccomp.json BASELINE.json CANDIDATE.json
 
@@ -82,9 +92,10 @@ Policy gate:
 Machine-readable output:
   wabi compare --format json BASELINE CANDIDATE
   wabi compare --format sarif BASELINE CANDIDATE
+  wabi matrix --config environments.json --format json BASELINE.json CANDIDATE.json
 
-Exit codes for compare:
+Exit codes for compare/matrix:
   0  compatible/no fatal error
   3  changes found when --fail-on-change is enabled
-  4  breaking runtime, target, scenario, or policy regression detected`)
+  4  breaking runtime, target, scenario, policy, or environment regression detected`)
 }
