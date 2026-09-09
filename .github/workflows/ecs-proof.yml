@@ -1,0 +1,55 @@
+name: ECS Proof
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ecs-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Unit proof
+        run: go test ./internal/target ./internal/compat
+      - name: Build wabi
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Build deterministic releases
+        run: |
+          docker build -t wabi-ecs:v1 ./examples/demo/v1
+          docker build -t wabi-ecs:v2 ./examples/demo/v2
+      - name: Record persisted baseline and candidate evidence
+        shell: bash
+        run: |
+          ./bin/wabi record --observe 500ms wabi-ecs:v1 > /tmp/baseline.json
+          ./bin/wabi record --observe 500ms wabi-ecs:v2 > /tmp/candidate.json
+          grep -q '"fingerprint": "sha256:' /tmp/baseline.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate.json
+          grep -q '/tmp/version' /tmp/baseline.json
+          grep -q '/var/lib/demo' /tmp/candidate.json
+      - name: Prove ECS readonly rootfs rejects the new write
+        shell: bash
+        run: |
+          set +e
+          ./bin/wabi compare-snapshots \
+            --target ./examples/ecs/task-definition.json \
+            --format json \
+            /tmp/baseline.json /tmp/candidate.json > /tmp/ecs-report.json
+          code=$?
+          set -e
+
+          cat /tmp/ecs-report.json
+          test "$code" -eq 4
+          jq -e '.verdict == "BREAKING"' /tmp/ecs-report.json >/dev/null
+          jq -e '.target == "ecs:wabi-ecs-proof#api"' /tmp/ecs-report.json >/dev/null
+          jq -e '.changes[] | select(.surface == "filesystem" and .kind == "target-conflict" and .severity == "breaking" and (.after | contains("/var/lib/demo")))' /tmp/ecs-report.json >/dev/null
+          jq -e '[.changes[] | select(.severity == "breaking" and .surface != "filesystem")] | length == 0' /tmp/ecs-report.json >/dev/null
