@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/v1alpha3/snapshot.schema.json",
+  "title": "Workload ABI Snapshot",
+  "description": "Normalized runtime evidence captured for a single workload release, including provider-neutral deep runtime events.",
+  "type": "object",
+  "required": ["schema_version", "image", "fingerprint", "captured_at", "image_config", "runtime", "lifecycle"],
+  "properties": {
+    "schema_version": {"const": "wabi.dev/v1alpha3"},
+    "image": {"type": "string", "minLength": 1},
+    "image_id": {"type": "string"},
+    "scenario": {"type": "string"},
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "processes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {"command": {"type": "string"}},
+        "additionalProperties": false
+      }
+    },
+    "filesystem": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "path"],
+        "properties": {"kind": {"type": "string"}, "path": {"type": "string"}},
+        "additionalProperties": false
+      }
+    },
+    "listeners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["protocol", "port"],
+        "properties": {
+          "protocol": {"type": "string"},
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+        },
+        "additionalProperties": false
+      }
+    },
+    "runtime_events": {
+      "type": "array",
+      "description": "Provider-neutral deep runtime evidence. source, pid and rule are diagnostic and not part of semantic identity.",
+      "items": {
+        "type": "object",
+        "required": ["category", "operation"],
+        "properties": {
+          "source": {"type": "string"},
+          "category": {"enum": ["process", "file", "network", "syscall", "security"]},
+          "operation": {"type": "string", "minLength": 1},
+          "process": {"type": "string"},
+          "parent_process": {"type": "string"},
+          "target": {"type": "string"},
+          "protocol": {"type": "string"},
+          "direction": {"enum": ["", "inbound", "outbound"]},
+          "pid": {"type": "integer", "minimum": 0},
+          "rule": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "scenario_steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "command", "exit_code", "success", "duration"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "command": {"type": "array", "items": {"type": "string"}},
+          "exit_code": {"type": "integer"},
+          "success": {"type": "boolean"},
+          "allow_failure": {"type": "boolean"},
+          "duration": {"type": "integer", "minimum": 0, "description": "Nanoseconds."},
+          "output": {"type": "string"},
+          "error": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "image_config": {
+      "type": "object",
+      "properties": {
+        "user": {"type": "string"},
+        "entrypoint": {"type": "array", "items": {"type": "string"}},
+        "cmd": {"type": "array", "items": {"type": "string"}},
+        "working_dir": {"type": "string"},
+        "stop_signal": {"type": "string"},
+        "exposed_ports": {"type": "array", "items": {"type": "string"}},
+        "healthcheck": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["privileged", "readonly_rootfs"],
+      "properties": {
+        "privileged": {"type": "boolean"},
+        "readonly_rootfs": {"type": "boolean"},
+        "cap_add": {"type": "array", "items": {"type": "string"}},
+        "cap_drop": {"type": "array", "items": {"type": "string"}},
+        "memory_limit_bytes": {"type": "integer", "minimum": 0},
+        "nano_cpus": {"type": "integer", "minimum": 0},
+        "pids_limit": {"type": "integer"},
+        "container_status": {"type": "string"},
+        "exit_code": {"type": "integer"},
+        "network_mode": {"type": "string"},
+        "networks": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": ["start_duration", "stop_duration"],
+      "properties": {
+        "start_duration": {"type": "integer", "minimum": 0},
+        "stop_duration": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "stats": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {"type": "string"},
+        "mem_usage": {"type": "string"},
+        "net_io": {"type": "string"},
+        "block_io": {"type": "string"},
+        "pids": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
