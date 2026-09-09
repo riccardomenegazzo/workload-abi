@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -19,7 +20,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Build release binaries
+      - name: Build release binaries and schemas
         shell: bash
         run: |
           set -euo pipefail
@@ -52,7 +53,40 @@ jobs:
           build windows amd64 ".exe"
           build windows arm64 ".exe"
 
+          tar -C schemas -czf "dist/wabi_${version}_schemas.tar.gz" v1alpha2
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: Build and publish multi-arch container
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY}"
+          version="${GITHUB_REF_NAME}"
+          semver="${version#v}"
+
+          docker buildx create --name wabi-release --use
+          docker buildx inspect --bootstrap
+
+          tags=(
+            --tag "${image}:${version}"
+            --tag "${image}:${semver}"
+          )
+          if [[ "$version" != *-* ]]; then
+            tags+=(--tag "${image}:latest")
+          fi
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "VERSION=${version}" \
+            --provenance=mode=max \
+            --sbom=true \
+            "${tags[@]}" \
+            --push \
+            .
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
