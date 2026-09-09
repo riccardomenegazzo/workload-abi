@@ -23,7 +23,7 @@ const (
 
 type Config struct {
 	SchemaVersion string            `json:"schema_version"`
-	Environments []EnvironmentSpec `json:"environments"`
+	Environments  []EnvironmentSpec `json:"environments"`
 }
 
 type EnvironmentSpec struct {
