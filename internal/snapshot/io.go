@@ -33,8 +33,11 @@ func Validate(s model.Snapshot) error {
 	if s.Image == "" {
 		return fmt.Errorf("snapshot image is required")
 	}
-	if s.SchemaVersion != "" && s.SchemaVersion != model.SchemaVersion {
+	if !model.IsSupportedSchema(s.SchemaVersion) {
 		return fmt.Errorf("unsupported snapshot schema %q", s.SchemaVersion)
+	}
+	if s.SchemaVersion == model.SchemaVersionV1Alpha2 && len(s.RuntimeEvents) > 0 {
+		return fmt.Errorf("v1alpha2 snapshot cannot contain v1alpha3 runtime_events")
 	}
 	return nil
 }
