@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	rawEventSize = 160
-	commOffset   = 8
-	commSize     = 16
+	rawEventSize  = 160
+	commOffset    = 8
+	commSize      = 16
 	payloadOffset = 24
 	payloadSize   = 128
 
@@ -36,7 +36,6 @@ const (
 )
 
 type attachedProbe struct {
-	name string
 	prog *ebpf.Program
 	link link.Link
 }
@@ -75,7 +74,7 @@ func record(ctx context.Context, opts Options) (Result, error) {
 			}
 			offset = value
 		}
-		prog, progErr := newTracepointProgram(name, kind, offset, events)
+		prog, progErr := newTracepointProgram(kind, offset, events)
 		if progErr != nil {
 			result.Stats.Probes = append(result.Stats.Probes, ProbeStatus{Name: name, Error: progErr.Error()})
 			return
@@ -86,11 +85,11 @@ func record(ctx context.Context, opts Options) (Result, error) {
 			result.Stats.Probes = append(result.Stats.Probes, ProbeStatus{Name: name, Error: linkErr.Error()})
 			return
 		}
-		probes = append(probes, attachedProbe{name: name, prog: prog, link: tp})
+		probes = append(probes, attachedProbe{prog: prog, link: tp})
 		result.Stats.Probes = append(result.Stats.Probes, ProbeStatus{Name: name, Available: true})
 	}
 
-	attach("process-exec", "sched", "sched_process_exec", kindExec, "")
+	attach("process-exec", "syscalls", "sys_enter_execve", kindExec, "filename")
 	attach("file-openat", "syscalls", "sys_enter_openat", kindOpenat, "filename")
 	attach("network-connect", "syscalls", "sys_enter_connect", kindConnect, "uservaddr")
 
@@ -156,7 +155,7 @@ func record(ctx context.Context, opts Options) (Result, error) {
 	return result, nil
 }
 
-func newTracepointProgram(name string, kind int32, contextOffset int16, events *ebpf.Map) (*ebpf.Program, error) {
+func newTracepointProgram(kind int32, contextOffset int16, events *ebpf.Map) (*ebpf.Program, error) {
 	insns := asm.Instructions{
 		asm.Mov.Reg(asm.R7, asm.R1),
 		asm.Mov.Reg(asm.R6, asm.RFP),
@@ -177,7 +176,7 @@ func newTracepointProgram(name string, kind int32, contextOffset int16, events *
 	)
 
 	switch kind {
-	case kindOpenat:
+	case kindExec, kindOpenat:
 		insns = append(insns,
 			asm.LoadMem(asm.R3, asm.R7, contextOffset, asm.DWord),
 			asm.Mov.Reg(asm.R1, asm.R6),
@@ -207,11 +206,24 @@ func newTracepointProgram(name string, kind int32, contextOffset int16, events *
 	)
 
 	return ebpf.NewProgram(&ebpf.ProgramSpec{
-		Name:         "wabi_" + strings.ReplaceAll(name, "-", "_"),
+		Name:         programName(kind),
 		Type:         ebpf.TracePoint,
 		License:      "GPL",
 		Instructions: insns,
 	})
+}
+
+func programName(kind int32) string {
+	switch kind {
+	case kindExec:
+		return "wabi_exec"
+	case kindOpenat:
+		return "wabi_open"
+	case kindConnect:
+		return "wabi_conn"
+	default:
+		return "wabi_evt"
+	}
 }
 
 func tracepointFieldOffset(group, event, field string) (int16, error) {
@@ -226,6 +238,9 @@ func tracepointFieldOffset(group, event, field string) (int16, error) {
 		}
 		return parseFieldOffset(string(data), field)
 	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
 	return 0, fmt.Errorf("read tracepoint format for %s/%s: %w", group, event, lastErr)
 }
 
@@ -238,10 +253,13 @@ func decodeEvent(raw []byte) model.RuntimeEvent {
 
 	switch kind {
 	case kindExec:
-		return model.RuntimeEvent{Source: "native-ebpf", Category: "process", Operation: "exec", Process: comm, ParentProcess: parent, PID: pid}
+		process := cString(payload)
+		if process == "" {
+			process = comm
+		}
+		return model.RuntimeEvent{Source: "native-ebpf", Category: "process", Operation: "exec", Process: process, ParentProcess: parent, PID: pid}
 	case kindOpenat:
-		target := cString(payload)
-		return model.RuntimeEvent{Source: "native-ebpf", Category: "file", Operation: "open", Process: comm, ParentProcess: parent, Target: target, PID: pid}
+		return model.RuntimeEvent{Source: "native-ebpf", Category: "file", Operation: "open", Process: comm, ParentProcess: parent, Target: cString(payload), PID: pid}
 	case kindConnect:
 		target, protocol := socketTarget(payload)
 		return model.RuntimeEvent{Source: "native-ebpf", Category: "network", Operation: "connect", Process: comm, ParentProcess: parent, Target: target, Protocol: protocol, Direction: "outbound", PID: pid}
