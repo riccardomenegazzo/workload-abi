@@ -22,7 +22,7 @@ jobs:
           cache: false
 
       - name: Unit proof
-        run: go test ./internal/matrix ./internal/environment
+        run: go test ./internal/matrix ./internal/environment ./internal/dashboard
 
       - name: Build wabi
         run: go build -o ./bin/wabi ./cmd/wabi
@@ -37,10 +37,21 @@ jobs:
           ./bin/wabi record --observe 1s wabi-matrix:v1 > baseline.json
           ./bin/wabi record --observe 1s wabi-matrix:v2 > candidate.json
 
-      - name: Add candidate network and syscall evidence
+      - name: Build deep evidence used by both matrix and causal graph
         run: |
           ./bin/wabi enrich \
+            --snapshot baseline.json \
+            --events examples/deep/graph-baseline.jsonl \
+            --format generic \
+            --output baseline.deep.json
+
+          ./bin/wabi enrich \
             --snapshot candidate.json \
+            --events examples/deep/graph-candidate.jsonl \
+            --format generic \
+            --output candidate.graph-events.json
+          ./bin/wabi enrich \
+            --snapshot candidate.graph-events.json \
             --events examples/networkpolicy/candidate-events.json \
             --format generic \
             --output candidate.net.json
@@ -57,7 +68,7 @@ jobs:
             --config examples/matrix/environments.json \
             --output matrix.json \
             --format json \
-            baseline.json candidate.deep.json > matrix.stdout.json
+            baseline.deep.json candidate.deep.json > matrix.stdout.json
           code=$?
           set -e
 
@@ -79,6 +90,50 @@ jobs:
 
       - name: Verify matrix integrity
         run: ./bin/wabi verify-matrix matrix.json
+
+      - name: Build causal graphs bound to matrix snapshots
+        run: |
+          ./bin/wabi graph --output baseline.graph.json baseline.deep.json
+          ./bin/wabi graph --output candidate.graph.json candidate.deep.json
+          test "$(jq -r '.snapshot_fingerprint' baseline.graph.json)" = "$(jq -r '.baseline_fingerprint' matrix.json)"
+          test "$(jq -r '.snapshot_fingerprint' candidate.graph.json)" = "$(jq -r '.candidate_fingerprint' matrix.json)"
+
+      - name: Export self-contained dashboard
+        run: |
+          ./bin/wabi dashboard \
+            --matrix matrix.json \
+            --baseline-graph baseline.graph.json \
+            --candidate-graph candidate.graph.json \
+            --export dashboard.html
+          test -s dashboard.html
+          grep -q "Workload ABI" dashboard.html
+          grep -q "developer-compose" dashboard.html
+          grep -q "production-ecs" dashboard.html
+          if grep -q "__WABI_DASHBOARD_DATA__" dashboard.html; then
+            echo "dashboard data marker was not replaced"
+            exit 1
+          fi
+
+      - name: Prove local dashboard server and health endpoint
+        run: |
+          ./bin/wabi dashboard \
+            --matrix matrix.json \
+            --baseline-graph baseline.graph.json \
+            --candidate-graph candidate.graph.json \
+            --listen 127.0.0.1:8787 > dashboard.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/healthz | grep -q '^ok$'; then
+              break
+            fi
+            sleep 0.2
+          done
+          curl -fsS http://127.0.0.1:8787/ | grep -q "Environment compatibility"
+          curl -fsSI http://127.0.0.1:8787/ | grep -qi "content-security-policy: default-src 'none'"
+          kill "$pid"
+          wait "$pid" || true
+          trap - EXIT
 
       - name: Prove matrix tamper detection
         run: |
