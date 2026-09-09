@@ -1,0 +1,89 @@
+name: Environment Matrix
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  environment-matrix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Unit proof
+        run: go test ./internal/matrix ./internal/environment
+
+      - name: Build wabi
+        run: go build -o ./bin/wabi ./cmd/wabi
+
+      - name: Build deterministic releases
+        run: |
+          docker build -t wabi-matrix:v1 examples/demo/v1
+          docker build -t wabi-matrix:v2 examples/demo/v2
+
+      - name: Record persisted baseline and candidate evidence
+        run: |
+          ./bin/wabi record --observe 1s wabi-matrix:v1 > baseline.json
+          ./bin/wabi record --observe 1s wabi-matrix:v2 > candidate.json
+
+      - name: Add candidate network and syscall evidence
+        run: |
+          ./bin/wabi enrich \
+            --snapshot candidate.json \
+            --events examples/networkpolicy/candidate-events.json \
+            --format generic \
+            --output candidate.net.json
+          ./bin/wabi enrich \
+            --snapshot candidate.net.json \
+            --events examples/seccomp/candidate-syscalls.jsonl \
+            --format generic \
+            --output candidate.deep.json
+
+      - name: Prove one release against four environments
+        run: |
+          set +e
+          ./bin/wabi matrix \
+            --config examples/matrix/environments.json \
+            --output matrix.json \
+            --format json \
+            baseline.json candidate.deep.json > matrix.stdout.json
+          code=$?
+          set -e
+
+          test "$code" -eq 4
+          test "$(jq -r '.schema_version' matrix.json)" = "wabi.matrix/v1alpha1"
+          test "$(jq -r '.verdict' matrix.json)" = "BREAKING"
+          test "$(jq -r '.summary.changed' matrix.json)" -eq 1
+          test "$(jq -r '.summary.breaking' matrix.json)" -eq 3
+          test "$(jq -r '.environments | length' matrix.json)" -eq 4
+
+          test "$(jq -r '.environments[] | select(.name=="developer-compose") | .verdict' matrix.json)" = "CHANGED"
+          test "$(jq -r '.environments[] | select(.name=="staging-kubernetes") | .verdict' matrix.json)" = "BREAKING"
+          test "$(jq -r '.environments[] | select(.name=="production-ecs") | .verdict' matrix.json)" = "BREAKING"
+          test "$(jq -r '.environments[] | select(.name=="hardened-runtime") | .verdict' matrix.json)" = "BREAKING"
+
+          jq -e '.environments[] | select(.name=="staging-kubernetes") | [.changes[] | select(.surface=="runtime-network" and .severity=="breaking")] | length > 0' matrix.json
+          jq -e '.environments[] | select(.name=="production-ecs") | [.changes[] | select(.surface=="filesystem" and .severity=="breaking")] | length > 0' matrix.json
+          jq -e '.environments[] | select(.name=="hardened-runtime") | [.changes[] | select(.surface=="syscall" and .severity=="breaking")] | length > 0' matrix.json
+
+      - name: Verify matrix integrity
+        run: ./bin/wabi verify-matrix matrix.json
+
+      - name: Prove matrix tamper detection
+        run: |
+          jq '(.environments[] | select(.name=="production-ecs") | .verdict) = "COMPATIBLE"' matrix.json > matrix.tampered.json
+          if ./bin/wabi verify-matrix matrix.tampered.json; then
+            echo "tampered matrix unexpectedly verified"
+            exit 1
+          fi
