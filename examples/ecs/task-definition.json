@@ -1,0 +1,27 @@
+{
+  "family": "wabi-ecs-proof",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "wabi-ecs:fixture",
+      "essential": true,
+      "memory": 256,
+      "memoryReservation": 64,
+      "readonlyRootFilesystem": true,
+      "stopTimeout": 30,
+      "mountPoints": [
+        {
+          "sourceVolume": "tmp",
+          "containerPath": "/tmp",
+          "readOnly": false
+        }
+      ]
+    }
+  ],
+  "volumes": [
+    {
+      "name": "tmp"
+    }
+  ]
+}
