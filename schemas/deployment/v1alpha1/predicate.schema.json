@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/deployment/v1alpha1/predicate.schema.json",
+  "title": "Workload ABI Deployment Predicate",
+  "type": "object",
+  "required": ["schema_version", "candidate", "matrix"],
+  "properties": {
+    "schema_version": {"const": "wabi.deployment/v1alpha1"},
+    "candidate": {
+      "type": "object",
+      "required": ["name", "operational_fingerprint"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "operational_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "matrix": {"$ref": "../../matrix/v1alpha1/matrix.schema.json"},
+    "baseline_graph": {"$ref": "#/$defs/graphBinding"},
+    "candidate_graph": {"$ref": "#/$defs/graphBinding"}
+  },
+  "$defs": {
+    "graphBinding": {
+      "type": "object",
+      "required": ["schema_version", "fingerprint", "snapshot_fingerprint"],
+      "properties": {
+        "schema_version": {"const": "wabi.graph/v1alpha1"},
+        "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "snapshot_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"required": ["baseline_graph"]},
+      "then": {"required": ["candidate_graph"]}
+    },
+    {
+      "if": {"required": ["candidate_graph"]},
+      "then": {"required": ["baseline_graph"]}
+    }
+  ],
+  "additionalProperties": false
+}
