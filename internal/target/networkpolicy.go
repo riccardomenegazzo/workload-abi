@@ -192,7 +192,7 @@ func (s KubernetesLabelSelector) Matches(labels map[string]string) bool {
 				return false
 			}
 		case "notin":
-			if !exists || containsString(expr.Values, value) {
+			if exists && containsString(expr.Values, value) {
 				return false
 			}
 		case "exists":
