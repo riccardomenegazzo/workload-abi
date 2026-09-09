@@ -71,6 +71,7 @@ Target-aware comparison:
   wabi compare --target compose.yaml --service api BASELINE CANDIDATE
   wabi compare --target deployment.json --target-kind kubernetes --container api BASELINE CANDIDATE
   wabi compare-snapshots --target deployment.json --target-kind kubernetes --network-policy egress.json BASELINE.json CANDIDATE.json
+  wabi compare-snapshots --target task-definition.json --target-kind ecs --container api BASELINE.json CANDIDATE.json
 
 Seccomp proof from exact syscall evidence:
   wabi compare-snapshots --seccomp-profile seccomp.json BASELINE.json CANDIDATE.json
