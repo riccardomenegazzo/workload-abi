@@ -1,0 +1,70 @@
+name: Kubernetes NetworkPolicy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  networkpolicy-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build wabi
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Unit proof
+        run: go test -race ./internal/target ./internal/compat
+      - name: Build deterministic workload
+        run: docker build -t wabi-networkpolicy-demo:v1 ./examples/demo/v1
+      - name: Record equivalent baseline and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/wabi record --observe 250ms wabi-networkpolicy-demo:v1 > /tmp/baseline.json
+          ./bin/wabi record --observe 250ms wabi-networkpolicy-demo:v1 > /tmp/candidate.json
+
+          grep -q '"fingerprint": "sha256:' /tmp/baseline.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate.json
+      - name: Add candidate outbound dependency through public RuntimeEvent contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/wabi enrich \
+            --snapshot /tmp/candidate.json \
+            --events ./examples/networkpolicy/candidate-events.json \
+            --format generic \
+            --output /tmp/candidate-network.json
+
+          grep -q '203.0.113.10:443' /tmp/candidate-network.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate-network.json
+      - name: Prove NetworkPolicy blocks the new dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          ./bin/wabi compare-snapshots \
+            --target ./examples/networkpolicy/deployment.json \
+            --target-kind kubernetes \
+            --container api \
+            --network-policy ./examples/networkpolicy/egress.json \
+            --format json \
+            /tmp/baseline.json /tmp/candidate-network.json > /tmp/networkpolicy-report.json
+          code=$?
+          set -e
+
+          cat /tmp/networkpolicy-report.json
+          test "$code" -eq 4
+          jq -e '.verdict == "BREAKING"' /tmp/networkpolicy-report.json
+          jq -e '.target == "kubernetes:Deployment/api#api+networkpolicy:egress.json"' /tmp/networkpolicy-report.json
+          jq -e '[.changes[] | select(.surface == "runtime-network" and .kind == "target-conflict" and .severity == "breaking")] | length == 1' /tmp/networkpolicy-report.json
+          jq -e '[.changes[] | select(.surface == "runtime-network" and .kind == "target-conflict")][0].after | contains("203.0.113.10:443")' /tmp/networkpolicy-report.json
+          jq -e '[.changes[] | select(.surface == "runtime-network" and .kind == "target-conflict")][0].message | contains("api-egress")' /tmp/networkpolicy-report.json

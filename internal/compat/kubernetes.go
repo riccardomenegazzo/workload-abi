@@ -2,6 +2,7 @@ package compat
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,9 @@ import (
 
 func ApplyKubernetes(c model.Comparison, base, candidate model.Snapshot, t target.KubernetesTarget) model.Comparison {
 	c.Target = fmt.Sprintf("kubernetes:%s/%s#%s", t.Kind, t.Name, t.Container)
+	if t.NetworkPolicyFile != "" {
+		c.Target += "+networkpolicy:" + filepath.Base(t.NetworkPolicyFile)
+	}
 
 	if t.ReadOnlyRootfs {
 		baseFS := fsMap(base.Filesystem)
@@ -60,6 +64,7 @@ func ApplyKubernetes(c model.Comparison, base, candidate model.Snapshot, t targe
 			"candidate runtime requires privileged execution while Kubernetes disallows privilege escalation")
 	}
 
+	applyKubernetesNetworkPolicies(&c, base, candidate, t)
 	return c
 }
 

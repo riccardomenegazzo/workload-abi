@@ -67,6 +67,7 @@ func runCompare(args []string) int {
 	service := fs.String("service", "", "Compose service to evaluate")
 	workload := fs.String("workload", "", "Kubernetes workload to evaluate")
 	containerName := fs.String("container", "", "Kubernetes container to evaluate")
+	networkPolicyFile := fs.String("network-policy", "", "Kubernetes NetworkPolicy file used to prove observed egress compatibility")
 	scenarioFile := fs.String("scenario", "", "JSON scenario applied identically to both releases")
 	policyFile := fs.String("policy", "", "JSON compatibility policy")
 	if err := fs.Parse(args); err != nil {
@@ -74,6 +75,10 @@ func runCompare(args []string) int {
 	}
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE")
+		return 2
+	}
+	if *networkPolicyFile != "" && *targetFile == "" {
+		fmt.Fprintln(os.Stderr, "wabi: --network-policy requires a Kubernetes --target workload")
 		return 2
 	}
 	format, err := resolveFormat(*outputFormat, *jsonOut)
@@ -116,7 +121,7 @@ func runCompare(args []string) int {
 	comparison.Scenario = scenarioName
 
 	if *targetFile != "" {
-		comparison, err = applyTarget(ctx, comparison, base, candidate, *targetFile, *targetKind, *service, *workload, *containerName)
+		comparison, err = applyTarget(ctx, comparison, base, candidate, *targetFile, *targetKind, *service, *workload, *containerName, *networkPolicyFile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "target:", err)
 			return 1
@@ -195,12 +200,17 @@ func runCompareSnapshots(args []string) int {
 	service := fs.String("service", "", "Compose service to evaluate")
 	workload := fs.String("workload", "", "Kubernetes workload to evaluate")
 	containerName := fs.String("container", "", "Kubernetes container to evaluate")
+	networkPolicyFile := fs.String("network-policy", "", "Kubernetes NetworkPolicy file used to prove observed egress compatibility")
 	policyFile := fs.String("policy", "", "JSON compatibility policy")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json")
+		return 2
+	}
+	if *networkPolicyFile != "" && *targetFile == "" {
+		fmt.Fprintln(os.Stderr, "wabi: --network-policy requires a Kubernetes --target workload")
 		return 2
 	}
 	format, err := resolveFormat(*outputFormat, *jsonOut)
@@ -228,7 +238,7 @@ func runCompareSnapshots(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if *targetFile != "" {
-		comparison, err = applyTarget(ctx, comparison, base, candidate, *targetFile, *targetKind, *service, *workload, *containerName)
+		comparison, err = applyTarget(ctx, comparison, base, candidate, *targetFile, *targetKind, *service, *workload, *containerName, *networkPolicyFile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "target:", err)
 			return 1
@@ -395,7 +405,7 @@ func applyTarget(
 	ctx context.Context,
 	c model.Comparison,
 	base, candidate model.Snapshot,
-	file, kind, service, workload, containerName string,
+	file, kind, service, workload, containerName, networkPolicyFile string,
 ) (model.Comparison, error) {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	if kind == "" || kind == "auto" {
@@ -407,6 +417,9 @@ func applyTarget(
 	}
 	switch kind {
 	case "compose":
+		if networkPolicyFile != "" {
+			return c, fmt.Errorf("--network-policy is only valid with a Kubernetes target")
+		}
 		t, err := target.LoadCompose(ctx, file, service)
 		if err != nil {
 			return c, err
@@ -416,6 +429,14 @@ func applyTarget(
 		t, err := target.LoadKubernetes(ctx, file, workload, containerName)
 		if err != nil {
 			return c, err
+		}
+		if networkPolicyFile != "" {
+			policies, err := target.LoadKubernetesNetworkPolicies(ctx, networkPolicyFile)
+			if err != nil {
+				return c, err
+			}
+			t.NetworkPolicyFile = networkPolicyFile
+			t.NetworkPolicies = policies
 		}
 		return compat.ApplyKubernetes(c, base, candidate, t), nil
 	default:
@@ -482,6 +503,7 @@ Causal runtime graph:
 Target-aware comparison:
   wabi compare --target compose.yaml --service api BASELINE CANDIDATE
   wabi compare --target deployment.json --target-kind kubernetes --container api BASELINE CANDIDATE
+  wabi compare-snapshots --target deployment.json --target-kind kubernetes --network-policy egress.json BASELINE.json CANDIDATE.json
 
 Policy gate:
   wabi compare --scenario scenario.json --target compose.yaml --policy policy.json BASELINE CANDIDATE
