@@ -1,0 +1,29 @@
+{
+  "schema_version": "wabi.matrix-config/v1alpha1",
+  "environments": [
+    {
+      "name": "developer-compose",
+      "target": "permissive-compose.yaml",
+      "target_kind": "compose",
+      "service": "app"
+    },
+    {
+      "name": "staging-kubernetes",
+      "target": "../networkpolicy/deployment.json",
+      "target_kind": "kubernetes",
+      "workload": "api",
+      "container": "api",
+      "network_policy": "../networkpolicy/egress.json"
+    },
+    {
+      "name": "production-ecs",
+      "target": "../ecs/task-definition.json",
+      "target_kind": "ecs",
+      "container": "api"
+    },
+    {
+      "name": "hardened-runtime",
+      "seccomp_profile": "../seccomp/profile.json"
+    }
+  ]
+}
