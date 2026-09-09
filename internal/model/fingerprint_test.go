@@ -24,6 +24,21 @@ func TestFingerprintIgnoresVolatileMeasurements(t *testing.T) {
 	}
 }
 
+func TestFingerprintDoesNotTreatImageReferenceAsBehavior(t *testing.T) {
+	a := Snapshot{
+		SchemaVersion: SchemaVersion,
+		Image:         "example/app:v1",
+		ImageID:       "sha256:image-one",
+		Processes:     []Process{{Command: "app"}},
+	}
+	b := a
+	b.Image = "registry.example/app:renamed"
+	b.ImageID = "sha256:image-two"
+	if Fingerprint(a) != Fingerprint(b) {
+		t.Fatal("operational fingerprint must not change for image identity metadata alone")
+	}
+}
+
 func TestFingerprintChangesWithBehavior(t *testing.T) {
 	a := Snapshot{SchemaVersion: SchemaVersion, Listeners: []Listener{{Protocol: "tcp", Port: 8080}}}
 	b := Snapshot{SchemaVersion: SchemaVersion, Listeners: []Listener{{Protocol: "tcp", Port: 9090}}}

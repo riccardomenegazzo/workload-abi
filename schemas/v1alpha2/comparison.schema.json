@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/v1alpha2/comparison.schema.json",
+  "title": "Workload ABI Comparison",
+  "type": "object",
+  "required": ["schema_version", "baseline", "candidate", "verdict", "changes"],
+  "properties": {
+    "schema_version": {"const": "wabi.dev/v1alpha2"},
+    "baseline": {"type": "string", "minLength": 1},
+    "candidate": {"type": "string", "minLength": 1},
+    "baseline_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "candidate_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "scenario": {"type": "string"},
+    "target": {"type": "string"},
+    "policy": {"type": "string"},
+    "verdict": {"enum": ["COMPATIBLE", "CHANGED", "BREAKING"]},
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["surface", "kind", "severity", "message"],
+        "properties": {
+          "surface": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "before": {"type": "string"},
+          "after": {"type": "string"},
+          "severity": {"enum": ["info", "warning", "breaking"]},
+          "message": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
