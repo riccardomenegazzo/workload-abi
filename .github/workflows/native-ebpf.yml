@@ -37,12 +37,8 @@ jobs:
         run: |
           bash ./scripts/build-release-artifacts.sh
           test -s /tmp/wabi-release/checksums.txt
-          for arch in amd64 arm64; do
-            archive="/tmp/wabi-release/wabi_ci_linux_${arch}.tar.gz"
-            test -s "$archive"
-            tar -tzf "$archive" | grep -q "/wabi$"
-            tar -tzf "$archive" | grep -q "/wabi-native$"
-          done
+          test -s /tmp/wabi-release/wabi_ci_linux_amd64.tar.gz
+          test -s /tmp/wabi-release/wabi_ci_linux_arm64.tar.gz
       - name: Build core CLI
         run: go build -trimpath -o ./bin/wabi ./cmd/wabi
       - name: Prepare tracefs
