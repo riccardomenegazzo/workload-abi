@@ -1,0 +1,26 @@
+name: Module Graph
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Resolve module graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          echo '--- GO.MOD ---'
+          cat go.mod
+          echo '--- GO.SUM ---'
+          cat go.sum
