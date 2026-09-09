@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/v1alpha2/scenario.schema.json",
+  "title": "Workload ABI Scenario",
+  "type": "object",
+  "properties": {
+    "name": {"type": "string"},
+    "environment": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "command": {"type": "array", "items": {"type": "string"}},
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["exec"],
+        "properties": {
+          "name": {"type": "string"},
+          "after": {"type": "string", "description": "Go duration, for example 250ms or 2s."},
+          "exec": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "timeout": {"type": "string", "description": "Positive Go duration."},
+          "allow_failure": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
