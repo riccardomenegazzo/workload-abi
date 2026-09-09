@@ -22,6 +22,25 @@ func TestStatementRoundTripVerification(t *testing.T) {
 	}
 }
 
+func TestLegacyV1Alpha2StatementStillVerifies(t *testing.T) {
+	c := model.Comparison{
+		SchemaVersion:        model.SchemaVersionV1Alpha2,
+		Candidate:            "legacy:v2",
+		CandidateFingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		Verdict:              "CHANGED",
+	}
+	s, err := New(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Predicate.SchemaVersion != model.SchemaVersionV1Alpha2 {
+		t.Fatalf("legacy predicate schema changed: %s", s.Predicate.SchemaVersion)
+	}
+	if err := Verify(s, c.CandidateFingerprint); err != nil {
+		t.Fatalf("legacy attestation should remain verifiable: %v", err)
+	}
+}
+
 func TestVerifyRejectsTamperedSubject(t *testing.T) {
 	c := model.Comparison{
 		SchemaVersion:        model.SchemaVersion,
