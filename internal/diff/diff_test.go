@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,45 @@ func TestCompareDetectsOperationalChanges(t *testing.T) {
 	}
 	if len(got.Changes) < 5 {
 		t.Fatalf("expected multiple semantic changes, got %d", len(got.Changes))
+	}
+}
+
+func TestCompareDetectsNewDeepNetworkBehavior(t *testing.T) {
+	base := model.Snapshot{Image: "app:v1"}
+	candidate := model.Snapshot{
+		Image: "app:v2",
+		RuntimeEvents: []model.RuntimeEvent{{
+			Source:    "falco",
+			Category:  "network",
+			Operation: "connect",
+			Process:   "curl",
+			Target:    "api.example:443",
+			Protocol:  "tcp",
+			Direction: "outbound",
+			PID:       42,
+		}},
+	}
+	got := Compare(base, candidate)
+	if got.Verdict != "CHANGED" {
+		t.Fatalf("verdict=%s want CHANGED", got.Verdict)
+	}
+	found := false
+	for _, change := range got.Changes {
+		if change.Surface == "runtime-network" && change.Kind == "runtime-event-added" && strings.Contains(change.Message, "api.example:443") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("deep network change not found: %#v", got.Changes)
+	}
+}
+
+func TestCompareIgnoresProviderDiagnosticDifferences(t *testing.T) {
+	base := model.Snapshot{Image: "app:v1", RuntimeEvents: []model.RuntimeEvent{{Source: "falco", Category: "file", Operation: "open", Process: "cat", Target: "/etc/config", PID: 1, Rule: "one"}}}
+	candidate := model.Snapshot{Image: "app:v2", RuntimeEvents: []model.RuntimeEvent{{Source: "tracee", Category: "file", Operation: "open", Process: "cat", Target: "/etc/config", PID: 999, Rule: "two"}}}
+	got := Compare(base, candidate)
+	if got.Verdict != "COMPATIBLE" || len(got.Changes) != 0 {
+		t.Fatalf("provider diagnostics should not produce semantic diff: %#v", got)
 	}
 }
 

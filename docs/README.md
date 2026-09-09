@@ -2,6 +2,7 @@
 
 - [`architecture.md`](architecture.md) — implementation boundaries and data flow.
 - [`specification.md`](specification.md) — Operational ABI concepts, evidence, compatibility and attestation semantics.
+- [`deep-evidence.md`](deep-evidence.md) — provider-neutral deep runtime evidence, Falco/Tracee adapters, and semantic identity.
 - [`roadmap.md`](roadmap.md) — capability roadmap and 1.0 maturity gates.
 
 Repository-level guides:

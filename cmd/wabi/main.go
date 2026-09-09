@@ -34,6 +34,8 @@ func main() {
 		os.Exit(runCompare(os.Args[2:]))
 	case "record":
 		os.Exit(runRecord(os.Args[2:]))
+	case "enrich":
+		os.Exit(runEnrich(os.Args[2:]))
 	case "compare-snapshots":
 		os.Exit(runCompareSnapshots(os.Args[2:]))
 	case "attest":
@@ -454,6 +456,7 @@ Discover operational breaking changes between container releases.
 Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
   wabi record            [flags] IMAGE
+  wabi enrich            --snapshot SNAPSHOT.json --events EVENTS.jsonl --format falco|tracee|generic
   wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
   wabi attest            [flags] COMPARISON.json
   wabi verify-attestation [flags] ATTESTATION.json
@@ -462,6 +465,9 @@ Commands:
 
 Equivalent multi-phase experiment:
   wabi compare --scenario scenario.json BASELINE CANDIDATE
+
+Deep runtime evidence:
+  wabi enrich --snapshot snapshot.json --events falco.jsonl --format falco --output enriched.json
 
 Target-aware comparison:
   wabi compare --target compose.yaml --service api BASELINE CANDIDATE

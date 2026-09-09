@@ -27,6 +27,40 @@ func TestLoadVerifiesFingerprint(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsV1Alpha2FingerprintAfterSchemaUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.json")
+	s := model.Snapshot{
+		SchemaVersion: model.SchemaVersionV1Alpha2,
+		Image:         "legacy:v1",
+		Processes:     []model.Process{{Command: "legacy"}},
+		Filesystem:    []model.FilesystemChange{{Kind: "A", Path: "/tmp/legacy"}},
+	}
+	s.Fingerprint = model.Fingerprint(s)
+	data, _ := json.Marshal(s)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("legacy v1alpha2 snapshot should remain loadable: %v", err)
+	}
+	if got.SchemaVersion != model.SchemaVersionV1Alpha2 {
+		t.Fatalf("legacy schema changed during load: %q", got.SchemaVersion)
+	}
+}
+
+func TestLoadRejectsV1Alpha2ClaimingDeepEvents(t *testing.T) {
+	s := model.Snapshot{
+		SchemaVersion: model.SchemaVersionV1Alpha2,
+		Image:         "legacy:v1",
+		RuntimeEvents: []model.RuntimeEvent{{Category: "file", Operation: "open", Target: "/etc/passwd"}},
+	}
+	if err := Validate(s); err == nil {
+		t.Fatal("expected v1alpha2 deep evidence rejection")
+	}
+}
+
 func TestLoadRejectsTamperedSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "snapshot.json")

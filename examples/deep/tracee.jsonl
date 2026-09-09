@@ -1,0 +1,2 @@
+{"timestamp":1657290245020940791,"processId":1664936,"parentProcessId":3795408,"processName":"app","eventName":"openat","syscall":"openat","args":[{"name":"dirfd","type":"int","value":-100},{"name":"pathname","type":"const char*","value":"/etc/app/config.yaml"}]}
+{"timestamp":1657290245021940791,"processId":1664936,"parentProcessId":3795408,"processName":"app","eventName":"connect","syscall":"connect","args":[{"name":"remote_addr","type":"string","value":"telemetry.example.com:443"},{"name":"protocol","type":"string","value":"tcp"}]}
