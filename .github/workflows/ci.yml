@@ -28,6 +28,20 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+      - name: Validate published JSON schemas
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          schemas = sorted(Path("schemas").rglob("*.json"))
+          if not schemas:
+              raise SystemExit("no published schemas found")
+          for path in schemas:
+              with path.open() as f:
+                  json.load(f)
+              print("validated", path)
+          PY
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -47,35 +61,41 @@ jobs:
           cache: false
       - name: Build wabi
         run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Build distributable container
+        run: |
+          docker build --build-arg VERSION=ci -t wabi-cli:ci .
+          test "$(docker run --rm wabi-cli:ci version)" = "wabi ci"
       - name: Build demo images
         run: |
           docker build -t wabi-demo:v1 ./examples/demo/v1
           docker build -t wabi-demo:v2 ./examples/demo/v2
-      - name: Prove multi-step scenario recording
+      - name: Record reusable runtime evidence
         shell: bash
         run: |
           ./bin/wabi record \
             --observe 500ms \
             --scenario ./examples/demo/scenario.json \
-            wabi-demo:v1 > /tmp/wabi-snapshot.json
+            wabi-demo:v1 > /tmp/baseline.json
+          ./bin/wabi record \
+            --observe 500ms \
+            --scenario ./examples/demo/scenario.json \
+            wabi-demo:v2 > /tmp/candidate.json
 
-          cat /tmp/wabi-snapshot.json
-          grep -q '"schema_version": "wabi.dev/v1alpha2"' /tmp/wabi-snapshot.json
-          grep -q '"scenario_steps"' /tmp/wabi-snapshot.json
-          grep -q '"success": true' /tmp/wabi-snapshot.json
-          grep -q '"fingerprint": "sha256:' /tmp/wabi-snapshot.json
-      - name: Prove target-aware breaking change
+          grep -q '"schema_version": "wabi.dev/v1alpha2"' /tmp/baseline.json
+          grep -q '"scenario_steps"' /tmp/baseline.json
+          grep -q '"success": true' /tmp/baseline.json
+          grep -q '"fingerprint": "sha256:' /tmp/baseline.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate.json
+      - name: Prove offline target-aware comparison
         shell: bash
         run: |
           set +e
-          ./bin/wabi compare \
-            --observe 500ms \
-            --scenario ./examples/demo/scenario.json \
+          ./bin/wabi compare-snapshots \
             --target ./examples/demo/compose.yaml \
             --service app \
             --policy ./examples/demo/policy.json \
             --format json \
-            wabi-demo:v1 wabi-demo:v2 > /tmp/wabi-report.json
+            /tmp/baseline.json /tmp/candidate.json > /tmp/wabi-report.json
           code=$?
           set -e
 
@@ -85,17 +105,45 @@ jobs:
           grep -q '"policy": "production-like"' /tmp/wabi-report.json
           grep -q '"verdict": "BREAKING"' /tmp/wabi-report.json
           grep -q 'target-conflict' /tmp/wabi-report.json
+          grep -q '"candidate_fingerprint": "sha256:' /tmp/wabi-report.json
+      - name: Prove tamper detection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          path = "/tmp/candidate.json"
+          with open(path) as f:
+              data = json.load(f)
+          data["image"] = data["image"] + "-tampered"
+          with open("/tmp/candidate-tampered.json", "w") as f:
+              json.dump(data, f)
+          PY
+          set +e
+          ./bin/wabi compare-snapshots /tmp/baseline.json /tmp/candidate-tampered.json >/tmp/tamper.out 2>&1
+          code=$?
+          set -e
+          cat /tmp/tamper.out
+          test "$code" -eq 1
+          grep -qi 'fingerprint' /tmp/tamper.out
+      - name: Prove in-toto attestation round trip
+        shell: bash
+        run: |
+          ./bin/wabi attest --output /tmp/wabi-attestation.json /tmp/wabi-report.json
+          fingerprint="$(jq -r .candidate_fingerprint /tmp/wabi-report.json)"
+          ./bin/wabi verify-attestation \
+            --candidate-fingerprint "$fingerprint" \
+            /tmp/wabi-attestation.json
+          grep -q '"_type": "https://in-toto.io/Statement/v1"' /tmp/wabi-attestation.json
+          grep -q 'https://wabi.dev/attestation/compatibility/v1alpha1' /tmp/wabi-attestation.json
       - name: Prove SARIF output
         shell: bash
         run: |
           set +e
-          ./bin/wabi compare \
-            --observe 500ms \
-            --scenario ./examples/demo/scenario.json \
+          ./bin/wabi compare-snapshots \
             --target ./examples/demo/compose.yaml \
             --service app \
             --format sarif \
-            wabi-demo:v1 wabi-demo:v2 > /tmp/wabi.sarif
+            /tmp/baseline.json /tmp/candidate.json > /tmp/wabi.sarif
           code=$?
           set -e
           test "$code" -eq 4
