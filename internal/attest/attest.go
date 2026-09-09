@@ -45,6 +45,9 @@ func New(c model.Comparison) (Statement, error) {
 	if c.SchemaVersion == "" {
 		c.SchemaVersion = model.SchemaVersion
 	}
+	if !model.IsSupportedSchema(c.SchemaVersion) {
+		return Statement{}, fmt.Errorf("unsupported comparison schema %q", c.SchemaVersion)
+	}
 	return Statement{
 		Type: StatementType,
 		Subject: []Subject{{
@@ -53,7 +56,7 @@ func New(c model.Comparison) (Statement, error) {
 		}},
 		PredicateType: PredicateType,
 		Predicate: Predicate{
-			SchemaVersion: model.SchemaVersion,
+			SchemaVersion: c.SchemaVersion,
 			Comparison:    c,
 		},
 	}, nil
@@ -66,13 +69,16 @@ func Verify(s Statement, expectedFingerprint string) error {
 	if s.PredicateType != PredicateType {
 		return fmt.Errorf("unexpected predicate type %q", s.PredicateType)
 	}
-	if s.Predicate.SchemaVersion != model.SchemaVersion {
+	if !model.IsSupportedSchema(s.Predicate.SchemaVersion) || s.Predicate.SchemaVersion == "" {
 		return fmt.Errorf("unsupported predicate schema %q", s.Predicate.SchemaVersion)
 	}
 	if len(s.Subject) != 1 {
 		return fmt.Errorf("expected exactly one attestation subject")
 	}
 	comparison := s.Predicate.Comparison
+	if comparison.SchemaVersion != "" && comparison.SchemaVersion != s.Predicate.SchemaVersion {
+		return fmt.Errorf("predicate schema %q does not match comparison schema %q", s.Predicate.SchemaVersion, comparison.SchemaVersion)
+	}
 	if comparison.Candidate == "" || comparison.CandidateFingerprint == "" {
 		return fmt.Errorf("attestation comparison is missing candidate evidence")
 	}
@@ -101,7 +107,7 @@ func LoadComparison(path string) (model.Comparison, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return c, fmt.Errorf("parse comparison: %w", err)
 	}
-	if c.SchemaVersion != "" && c.SchemaVersion != model.SchemaVersion {
+	if !model.IsSupportedSchema(c.SchemaVersion) {
 		return c, fmt.Errorf("unsupported comparison schema %q", c.SchemaVersion)
 	}
 	if c.Candidate == "" {
