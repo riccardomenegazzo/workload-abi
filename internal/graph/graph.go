@@ -57,12 +57,12 @@ type Explanation struct {
 }
 
 type Diff struct {
-	SchemaVersion       string        `json:"schema_version"`
-	BaselineFingerprint string        `json:"baseline_fingerprint"`
-	CandidateFingerprint string       `json:"candidate_fingerprint"`
-	Verdict             string        `json:"verdict"`
-	Changes             []EdgeChange  `json:"changes"`
-	Explanations        []Explanation `json:"explanations,omitempty"`
+	SchemaVersion        string        `json:"schema_version"`
+	BaselineFingerprint  string        `json:"baseline_fingerprint"`
+	CandidateFingerprint string        `json:"candidate_fingerprint"`
+	Verdict              string        `json:"verdict"`
+	Changes              []EdgeChange  `json:"changes"`
+	Explanations         []Explanation `json:"explanations,omitempty"`
 }
 
 func Build(snapshot model.Snapshot) Artifact {
@@ -227,7 +227,7 @@ func Compare(base, candidate Artifact) Diff {
 	if len(d.Changes) > 0 {
 		d.Verdict = "CHANGED"
 	}
-	d.Explanations = explain(base, candidate, d.Changes)
+	d.Explanations = explain(candidate, d.Changes)
 	return d
 }
 
@@ -247,7 +247,7 @@ func nodeMap(nodes []Node) map[string]Node {
 	return out
 }
 
-func explain(base, candidate Artifact, changes []EdgeChange) []Explanation {
+func explain(candidate Artifact, changes []EdgeChange) []Explanation {
 	nodes := nodeMap(candidate.Nodes)
 	var added []Edge
 	for _, change := range changes {
