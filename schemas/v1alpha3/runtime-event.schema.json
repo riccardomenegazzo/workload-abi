@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/v1alpha3/runtime-event.schema.json",
+  "title": "Workload ABI Runtime Event",
+  "description": "Provider-neutral deep runtime evidence. Diagnostic fields do not participate in semantic identity.",
+  "type": "object",
+  "required": ["category", "operation"],
+  "properties": {
+    "source": {"type": "string", "description": "Diagnostic producer identifier, excluded from semantic identity."},
+    "category": {"enum": ["process", "file", "network", "syscall", "security"]},
+    "operation": {"type": "string", "minLength": 1},
+    "process": {"type": "string"},
+    "parent_process": {"type": "string"},
+    "target": {"type": "string"},
+    "protocol": {"type": "string"},
+    "direction": {"enum": ["", "inbound", "outbound"]},
+    "pid": {"type": "integer", "minimum": 0, "description": "Diagnostic PID, excluded from semantic identity."},
+    "rule": {"type": "string", "description": "Diagnostic source rule, excluded from semantic identity."}
+  },
+  "additionalProperties": false
+}
