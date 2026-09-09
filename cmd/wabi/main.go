@@ -36,6 +36,8 @@ func main() {
 		os.Exit(runRecord(os.Args[2:]))
 	case "enrich":
 		os.Exit(runEnrich(os.Args[2:]))
+	case "native-record":
+		os.Exit(runNativeRecord(os.Args[2:]))
 	case "graph":
 		os.Exit(runGraph(os.Args[2:]))
 	case "graph-diff":
@@ -461,6 +463,7 @@ Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
   wabi record            [flags] IMAGE
   wabi enrich            --snapshot SNAPSHOT.json --events EVENTS.jsonl --format falco|tracee|generic
+  wabi native-record     --cgroup PATH|--pid PID [--duration 5s] [--output events.jsonl]
   wabi graph             [--output FILE] SNAPSHOT.json
   wabi graph-diff        [--format human|json] BASELINE.graph.json CANDIDATE.graph.json
   wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
@@ -474,6 +477,10 @@ Equivalent multi-phase experiment:
 
 Deep runtime evidence:
   wabi enrich --snapshot snapshot.json --events falco.jsonl --format falco --output enriched.json
+
+Native Linux cgroup eBPF evidence:
+  wabi native-record --pid 1234 --duration 10s --output native-events.jsonl
+  wabi enrich --snapshot snapshot.json --events native-events.jsonl --format generic --output native.deep.json
 
 Causal runtime graph:
   wabi graph --output candidate.graph.json candidate.enriched.json
@@ -490,8 +497,8 @@ Machine-readable output:
   wabi compare --format json BASELINE CANDIDATE
   wabi compare --format sarif BASELINE CANDIDATE
 
-Exit codes for compare:
+Exit codes for compare/native gates:
   0  compatible/no fatal error
-  3  changes found when --fail-on-change is enabled
+  3  changes found with --fail-on-change, or native events dropped with --fail-on-drop
   4  breaking runtime, target, scenario, or policy regression detected`)
 }
