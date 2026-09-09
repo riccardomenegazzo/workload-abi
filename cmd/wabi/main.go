@@ -30,6 +30,8 @@ func main() {
 		os.Exit(runMatrix(os.Args[2:]))
 	case "verify-matrix":
 		os.Exit(runVerifyMatrix(os.Args[2:]))
+	case "dashboard":
+		os.Exit(runDashboard(os.Args[2:]))
 	case "attest":
 		os.Exit(runAttest(os.Args[2:]))
 	case "verify-attestation":
@@ -58,6 +60,7 @@ Commands:
   wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
   wabi matrix            --config ENVIRONMENTS.json [flags] BASELINE.json CANDIDATE.json
   wabi verify-matrix     MATRIX.json
+  wabi dashboard         --matrix MATRIX.json [flags]
   wabi attest            [flags] COMPARISON.json
   wabi verify-attestation [flags] ATTESTATION.json
   wabi doctor            [--json]
@@ -82,6 +85,11 @@ Target-aware comparison:
 Environment compatibility matrix:
   wabi matrix --config environments.json --output matrix.json BASELINE.json CANDIDATE.json
   wabi verify-matrix matrix.json
+
+Deployability dashboard:
+  wabi dashboard --matrix matrix.json
+  wabi dashboard --matrix matrix.json --baseline-graph baseline.graph.json --candidate-graph candidate.graph.json
+  wabi dashboard --matrix matrix.json --export dashboard.html
 
 Seccomp proof from exact syscall evidence:
   wabi compare-snapshots --seccomp-profile seccomp.json BASELINE.json CANDIDATE.json
