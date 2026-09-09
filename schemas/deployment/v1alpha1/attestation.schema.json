@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/deployment/v1alpha1/attestation.schema.json",
+  "title": "Workload ABI Deployment Attestation",
+  "type": "object",
+  "required": ["_type", "subject", "predicateType", "predicate"],
+  "properties": {
+    "_type": {"const": "https://in-toto.io/Statement/v1"},
+    "subject": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["name", "digest"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "digest": {
+            "type": "object",
+            "required": ["sha256"],
+            "properties": {
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            },
+            "additionalProperties": {"type": "string"}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "predicateType": {"const": "https://wabi.dev/attestation/deployment/v1alpha1"},
+    "predicate": {"$ref": "predicate.schema.json"}
+  },
+  "additionalProperties": false
+}
