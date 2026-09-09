@@ -1,6 +1,6 @@
 # Architecture
 
-Workload ABI separates **evidence collection**, **normalization**, **comparison**, **target solving**, and **policy**. The normalized snapshot is the stable boundary: deeper observers can be added without coupling compatibility semantics to one runtime sensor.
+Workload ABI separates **evidence collection**, **normalization**, **comparison**, **target solving**, **policy**, and **attestation**. The normalized snapshot is the stable boundary: deeper observers can be added without coupling compatibility semantics to one runtime sensor.
 
 ## Pipeline
 
@@ -29,9 +29,13 @@ Workload ABI separates **evidence collection**, **normalization**, **comparison*
                             |
                             v
                  compatibility verdict
-                   /        |        \
-              human        JSON      SARIF
+                   /        |         \
+              human        JSON       SARIF
+                              \
+                               +----> in-toto statement
 ```
+
+Snapshots can be compared immediately or persisted and evaluated later. That split is intentional: collection can happen close to the build, while target solving, policy, review, and attestation can happen in a separate CI stage.
 
 ## Evidence schema
 
@@ -50,7 +54,15 @@ The current schema is `wabi.dev/v1alpha2`. A snapshot records:
 - optional-surface collection warnings;
 - a stable SHA-256 operational-evidence fingerprint.
 
-The fingerprint deliberately excludes volatile measurements such as capture timestamps, CPU percentages and exact lifecycle timings. It is intended to identify the normalized operational contract, not a noisy telemetry sample.
+Public machine-readable schemas are versioned under `schemas/`.
+
+## Operational fingerprint
+
+The fingerprint identifies normalized compatibility-relevant evidence, not the image bytes.
+
+It deliberately excludes volatile measurements such as capture timestamps, CPU percentages, diagnostic warnings, exact lifecycle timings, and scenario output where those values would introduce incidental nondeterminism.
+
+Persisted snapshots are verified on load by recomputing the fingerprint. A snapshot whose evidence changed without a matching fingerprint is rejected before comparison.
 
 ## Equivalent experiment engine
 
@@ -78,7 +90,7 @@ Compose is normalized with `docker compose config --format json`. The solver cur
 
 ### Kubernetes
 
-Kubernetes JSON manifests are parsed natively; YAML is rendered to JSON with `kubectl --dry-run=client` when available. Supported workload kinds are Pod, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob.
+Kubernetes JSON manifests are parsed natively; YAML is rendered to JSON with client-side `kubectl` normalization when available. Supported workload kinds are Pod, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob.
 
 Current constraints include:
 
@@ -89,11 +101,54 @@ Current constraints include:
 - dropped capabilities;
 - privilege-escalation restrictions.
 
+Target analysis is read-only and is not intended to mutate a Kubernetes cluster.
+
 ## Policy gate
 
 Policy is deliberately applied after evidence and target solving. A policy can require scenario/target context, reject severities, surfaces or change kinds, and enforce a maximum change count.
 
 A policy failure is not hidden state: it is appended to the result as explicit `policy-violation` evidence and promotes the verdict to `BREAKING`.
+
+## Offline evidence boundary
+
+`record` serializes a verified snapshot; `compare-snapshots` consumes two verified snapshots and reuses the same diff/target/policy pipeline as a live comparison.
+
+```text
+CI build stage                         CI decision stage
+--------------                         -----------------
+image A -> record -> snapshot A ----+
+                                      +-> verify fingerprints
+image B -> record -> snapshot B ----+          |
+                                                v
+                                         semantic diff
+                                                |
+                                          target + policy
+                                                |
+                                             verdict
+```
+
+This allows snapshots to be stored as build artifacts, reviewed, reproduced, or evaluated against multiple target environments without rerunning the workload.
+
+## Attestation boundary
+
+A comparison can be wrapped in an in-toto Statement v1 using the predicate type:
+
+```text
+https://wabi.dev/attestation/compatibility/v1alpha1
+```
+
+The subject is the candidate workload and its subject digest is derived from the candidate operational fingerprint. This deliberately does not masquerade as the OCI image digest.
+
+The built-in verifier checks:
+
+- statement and predicate types;
+- predicate schema version;
+- candidate/fingerprint presence;
+- subject/candidate consistency;
+- subject digest/fingerprint consistency;
+- optional expected fingerprint pinning.
+
+This provides integrity/consistency, not authorship. External systems such as Sigstore can sign the statement or the `--predicate-only` output when trust/authenticity is required.
 
 ## Recorder evolution
 
@@ -110,7 +165,7 @@ Recorder
 └── lifecycle observer
 ```
 
-The next major recorder depth is eBPF. That should enrich the same snapshot boundary rather than replace compatibility semantics.
+The next major recorder depth is eBPF. It should enrich the same snapshot boundary rather than replace compatibility semantics.
 
 ## Causal graph direction
 
@@ -130,9 +185,16 @@ workload
 
 This enables explanations such as “the main process now spawns a helper that reads a credential and connects to a new domain” instead of three unrelated events.
 
-## Supply-chain direction
+## Distribution
 
-The stable evidence fingerprint is the anchor for future OCI-linked Workload ABI attestations and signing. The attestation layer is intentionally downstream of runtime observation so signed artifacts describe evidence actually measured during a defined experiment.
+Tagged releases produce:
+
+- Linux/macOS/Windows binaries for amd64 and arm64;
+- checksums;
+- the public schema bundle;
+- a Linux multi-architecture GHCR image.
+
+The container release is built with BuildKit provenance and SBOM generation so Workload ABI's own distribution follows the same supply-chain principles the project expects from modern container workflows.
 
 ## Non-goals
 
