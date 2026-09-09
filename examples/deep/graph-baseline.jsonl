@@ -1,0 +1,1 @@
+{"source":"generic","category":"file","operation":"open","process":"/usr/bin/app","parent_process":"/sbin/init","target":"/etc/app/config.yaml"}
