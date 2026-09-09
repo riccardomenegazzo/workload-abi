@@ -3,92 +3,121 @@
 > **Your API didn't change. Your tests pass. Your image builds. Production can still break.**
 
 [![CI](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/ci.yml/badge.svg)](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/ci.yml)
+[![Environment Matrix](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/environment-matrix.yml/badge.svg)](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/environment-matrix.yml)
 [![Native eBPF](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/native-ebpf.yml/badge.svg)](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/native-ebpf.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Workload ABI (`wabi`) discovers operational breaking changes between container releases.**
+**Workload ABI (`wabi`) discovers operational breaking changes between container releases and proves where a candidate can actually run.**
 
-It executes two workload versions under equivalent conditions, captures normalized runtime evidence, optionally enriches that evidence with independent deep runtime sensors, derives a causal runtime graph, computes semantic differences, and tests the candidate against the environment where it is expected to run.
+It executes equivalent workload experiments, records normalized runtime evidence, accepts deep evidence from independent sensors, derives causal runtime graphs, evaluates production constraints, and produces a fingerprinted **Environment Compatibility Matrix** with an embedded deployability dashboard.
 
 ```text
-                         same experiment
-                              |
-                 +------------+------------+
-                 |                         |
-             image:v1                  image:v2
-                 |                         |
-                 v                         v
-            Docker record             Docker record
-                 |                         |
-          snapshot / fingerprint     snapshot / fingerprint
-                 |                         |
-       optional deep evidence      optional deep evidence
-   Falco / Tracee / wabi-native   Falco / Tracee / custom
-                 |                         |
-                 +------------+------------+
-                              |
-                  semantic diff + causal graph
-                              |
-                 +------------+------------+
-                 |                         |
-          Compose / Kubernetes           policy
-                 |                         |
-                 +------------+------------+
-                              |
-                              v
-              COMPATIBLE | CHANGED | BREAKING
-                              |
-                     JSON / SARIF / in-toto
+                         SAME EXPERIMENT
+                               │
+                  ┌────────────┴────────────┐
+                  │                         │
+              image:v1                 image:v2
+                  │                         │
+                  ▼                         ▼
+             Docker record            Docker record
+                  │                         │
+           snapshot / fingerprint   snapshot / fingerprint
+                  │                         │
+          optional deep evidence   optional deep evidence
+       Falco / Tracee / native / generic providers
+                  │                         │
+                  └────────────┬────────────┘
+                               ▼
+                    semantic diff + causal graph
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+           Compose        Kubernetes          ECS
+                              │
+                         NetworkPolicy
+              │                │                │
+              └─────────┬──────┴──────┬─────────┘
+                        ▼             ▼
+                     seccomp        policy
+                        │             │
+                        └──────┬──────┘
+                               ▼
+                ENVIRONMENT COMPATIBILITY MATRIX
+                               │
+             ┌─────────────────┼─────────────────┐
+             ▼                 ▼                 ▼
+        COMPATIBLE          CHANGED          BREAKING
+        deployable      deployable/review      blocked
+                               │
+                               ▼
+              Dashboard / JSON / SARIF / in-toto
 ```
 
 This is **not** an SBOM scanner, vulnerability scanner, attack simulator, or raw log differ.
 
 It answers a different question:
 
-> **Did this release change its operational interface, why did it change, and will that change break the environment where it runs?**
+> **Did this release change its operational interface, why did it change, and in which environments is that change deployable?**
+
+---
 
 ## Why this exists
 
-A release can keep the same API, pass every unit test, build successfully, have fewer CVEs, and still break production because it now:
+A release can keep the same API, pass every unit test, build successfully, and still break production because it now:
 
-- writes to a path that was previously read-only;
+- writes to a path that is read-only in production;
 - opens a new listener;
-- contacts a new external dependency;
+- contacts a new external dependency blocked by NetworkPolicy;
 - starts a helper process;
+- reads a credential it never touched before;
+- requires a syscall blocked by seccomp;
 - needs root or an additional Linux capability;
 - exceeds a memory limit;
-- stops responding correctly to the same runtime stimulus;
 - takes longer than the deployment shutdown grace period;
-- introduces a new syscall/kernel assumption.
+- behaves differently under the same runtime stimulus.
 
-Traditional SemVer does not describe these changes. Workload ABI treats them as changes to an **Operational ABI**.
+Traditional SemVer describes source/API compatibility. Workload ABI treats runtime assumptions as an **Operational ABI**.
 
-## The 30-second demo
+The core rule is:
 
-Record the same experiment against two releases:
+> **A difference is not automatically a breaking change.**
+>
+> Evidence describes what changed. Environment constraints determine whether that change is deployable.
+
+---
+
+## The 60-second path
+
+### 1. Record equivalent releases
 
 ```bash
 wabi record --scenario scenario.json app:1.8.3 > baseline.json
 wabi record --scenario scenario.json app:1.8.4 > candidate.json
 ```
 
-Optionally enrich both snapshots with real deep runtime evidence. Falco is one supported provider:
+### 2. Optionally enrich with deep runtime evidence
+
+Falco:
 
 ```bash
 wabi enrich \
-  --snapshot baseline.json \
-  --events falco-baseline.jsonl \
-  --format falco \
-  --output baseline.deep.json
-
-wabi enrich \
   --snapshot candidate.json \
-  --events falco-candidate.jsonl \
+  --events falco.jsonl \
   --format falco \
   --output candidate.deep.json
 ```
 
-Or capture normalized evidence directly on Linux with the optional native provider:
+Tracee:
+
+```bash
+wabi enrich \
+  --snapshot candidate.json \
+  --events tracee.jsonl \
+  --format tracee \
+  --output candidate.deep.json
+```
+
+Native Linux eBPF:
 
 ```bash
 sudo wabi-native record \
@@ -100,73 +129,199 @@ wabi enrich \
   --snapshot candidate.json \
   --events native-events.json \
   --format generic \
-  --output candidate.native.json
+  --output candidate.deep.json
 ```
 
-Compare snapshots against a deployment target:
+### 3. Prove the release against several environments
 
 ```bash
-wabi compare-snapshots \
-  --target compose.yaml \
-  --service api \
+wabi matrix \
+  --config environments.json \
+  --output matrix.json \
   baseline.deep.json candidate.deep.json
+```
+
+Example result:
+
+```text
+WORKLOAD ABI — ENVIRONMENT COMPATIBILITY MATRIX
+================================================================
+app:1.8.3 -> app:1.8.4
+
+ENVIRONMENT                 VERDICT      BLOCKERS
+----------------------------------------------------------------
+developer-compose           CHANGED      -
+staging-kubernetes          BREAKING     runtime-network
+production-ecs              BREAKING     filesystem
+hardened-runtime            BREAKING     syscall
+
+----------------------------------------------------------------
+MATRIX VERDICT: BREAKING
+compatible=0 changed=1 breaking=3
+```
+
+`CHANGED` means the release differs but no configured constraint proves it cannot run. It is **deployable with review**. Only `BREAKING` is blocked.
+
+### 4. Open the dashboard
+
+```bash
+wabi dashboard --matrix matrix.json
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:8787
+```
+
+Or export one portable HTML artifact:
+
+```bash
+wabi dashboard \
+  --matrix matrix.json \
+  --export dashboard.html
+```
+
+No Node, npm, CDN, database, or external backend is required.
+
+---
+
+## Deployability Dashboard
+
+The dashboard is embedded in the Go binary and renders only verified artifacts.
+
+It shows:
+
+- baseline and candidate workload identity;
+- Operational ABI fingerprints;
+- deployable vs blocked environment counts;
+- per-environment target and policy identity;
+- blocker surfaces (`filesystem`, `runtime-network`, `syscall`, `privilege`, `resource`, `lifecycle`, ...);
+- expandable normalized evidence;
+- search and deployable/blocked filtering;
+- blocker concentration;
+- artifact integrity bindings;
+- optional causal explanations;
+- matrix JSON export.
+
+With causal graphs:
+
+```bash
+wabi graph --output baseline.graph.json baseline.deep.json
+wabi graph --output candidate.graph.json candidate.deep.json
+
+wabi dashboard \
+  --matrix matrix.json \
+  --baseline-graph baseline.graph.json \
+  --candidate-graph candidate.graph.json
+```
+
+The dashboard refuses a graph if its `snapshot_fingerprint` does not match the exact snapshot fingerprint stored in the matrix. Causal visualization is therefore linked to the same evidence used for deployability decisions.
+
+A typical explanation can become:
+
+```text
+New process /usr/bin/helper is executed by /app,
+reads /var/run/secrets/token and connects to api.vendor.com:443.
+```
+
+See [`docs/deployability-dashboard.md`](docs/deployability-dashboard.md).
+
+---
+
+## Environment Compatibility Matrix
+
+The matrix is a derived, independently versioned artifact:
+
+```text
+wabi.matrix/v1alpha1
+```
+
+Configuration is also versioned:
+
+```text
+wabi.matrix-config/v1alpha1
 ```
 
 Example:
 
-```text
-WORKLOAD ABI
-================================================================
-app:1.8.3 -> app:1.8.4
-scenario: compatibility-smoke
-target:   compose:compose.yaml#api
-
-RUNTIME-NETWORK
-  + [WARNING] new deep runtime behavior observed:
-    network/connect process=/usr/bin/app
-    target=telemetry.example.com:443 protocol=tcp direction=outbound
-
-FILESYSTEM
-  ~ [BREAKING] candidate introduces a new filesystem mutation outside
-    writable Compose mounts while read_only is enabled
-
-LIFECYCLE
-  ~ [BREAKING] observed shutdown duration exceeds target grace period
-
-----------------------------------------------------------------
-RUNTIME COMPATIBILITY: BREAKING
+```json
+{
+  "schema_version": "wabi.matrix-config/v1alpha1",
+  "environments": [
+    {
+      "name": "developer-compose",
+      "target": "compose.yaml",
+      "target_kind": "compose",
+      "service": "api"
+    },
+    {
+      "name": "staging-kubernetes",
+      "target": "deployment.json",
+      "target_kind": "kubernetes",
+      "container": "api",
+      "network_policy": "egress.json"
+    },
+    {
+      "name": "production-ecs",
+      "target": "task-definition.json",
+      "target_kind": "ecs",
+      "container": "api"
+    },
+    {
+      "name": "hardened-runtime",
+      "seccomp_profile": "seccomp.json"
+    }
+  ]
+}
 ```
 
-That is the core distinction:
+Paths are resolved relative to the matrix config file, so an environment definition can be committed and moved with the repository.
 
-> **A difference is not automatically a breaking change.**
->
-> Workload ABI separates observed evidence from compatibility judgment.
+Each matrix artifact contains:
 
-## What works today
+- baseline/candidate image identity;
+- baseline/candidate Operational ABI fingerprints;
+- scenario identity;
+- complete per-environment changes;
+- target/policy identity;
+- compatible/changed/breaking summary;
+- deterministic matrix fingerprint.
+
+Verify a persisted matrix without rerunning workloads:
+
+```bash
+wabi verify-matrix matrix.json
+```
+
+Tampering with a verdict, blocker, environment, or evidence binding invalidates the fingerprint.
+
+---
+
+## Evidence model
 
 ### Equivalent experiments
 
-Docker is the reference execution backend. A JSON scenario can apply identical inputs to baseline and candidate:
+Docker is the reference execution backend. A scenario can apply identical inputs to baseline and candidate:
 
 - environment variables;
 - command override;
 - ordered `docker exec` steps;
 - per-step delays;
 - timeouts;
-- expected/allowed failures.
+- allowed/required step failures.
 
-A required scenario step that succeeds for baseline and fails for candidate is direct evidence of a breaking regression.
+A required step that succeeds for baseline and fails for candidate is direct breaking evidence.
 
-### Portable runtime evidence
+### Built-in Docker evidence
 
-The built-in Docker recorder captures:
+The recorder captures:
 
 - image configuration and identity;
 - process snapshot;
 - filesystem mutations;
 - TCP listeners;
-- Docker network mode and network attachments;
+- Docker network mode and attachments;
 - resource configuration and sampled usage;
 - startup/shutdown lifecycle;
 - exit status;
@@ -174,32 +329,18 @@ The built-in Docker recorder captures:
 
 Every persisted snapshot has a SHA-256 **Operational ABI fingerprint**.
 
-The fingerprint represents normalized compatibility-relevant behavior. It deliberately does not pretend to be an OCI image digest.
+### Provider-neutral deep evidence
 
-### Provider-neutral deep runtime evidence
-
-`wabi enrich` can merge event-level runtime evidence into a verified snapshot:
-
-```bash
-wabi enrich \
-  --snapshot snapshot.json \
-  --events events.jsonl \
-  --format falco|tracee|generic \
-  --output snapshot.deep.json
-```
-
-Current evidence providers:
+`wabi enrich` merges independent event evidence into a verified snapshot.
 
 | Provider | Input | Role |
 |---|---|---|
 | **Falco** | JSON alert stream | eBPF/syscall-derived runtime evidence |
 | **Tracee** | JSON event stream | eBPF runtime evidence |
-| **wabi-native** | normalized RuntimeEvent JSON array | optional native Linux eBPF recorder |
-| **Generic** | RuntimeEvent JSONL/array | any custom or third-party sensor |
+| **wabi-native** | RuntimeEvent JSON array | optional native Linux eBPF recorder |
+| **Generic** | RuntimeEvent JSONL/array | any third-party/custom sensor |
 
-Docker, Falco, Tracee, and the native provider are not embedded into compatibility semantics. They are evidence sources.
-
-The provider-neutral `RuntimeEvent` semantic identity includes:
+Normalized semantic identity includes:
 
 ```text
 category
@@ -211,91 +352,97 @@ protocol
 direction
 ```
 
-while provider diagnostics such as:
+Provider diagnostics such as source, PID and rule name do **not** define the Operational ABI.
 
-```text
-source
-pid
-rule
-```
-
-are intentionally excluded from semantic identity and the operational fingerprint.
-
-That means the same file open observed by Falco with PID `42`, Tracee with PID `9001`, or the native recorder with another PID is still the same Operational ABI fact.
+That means equivalent behavior observed by Falco, Tracee or `wabi-native` remains the same ABI fact.
 
 See [`docs/deep-evidence.md`](docs/deep-evidence.md).
 
-### Native Linux eBPF recorder
+---
 
-`wabi-native` is a separate optional binary. It keeps privileged host observation out of the portable core CLI while emitting the same public `RuntimeEvent` contract.
+## Native Linux eBPF recorder
 
-The v0.6 live vertical slice captures:
+`wabi-native` is a separate optional Linux binary so privileged host observation remains outside the portable core CLI.
 
-- process execution through `sys_enter_execve`;
-- file opens through `sys_enter_openat`;
-- outbound socket connects through `sys_enter_connect`;
-- IPv4 and IPv6 endpoint data;
+The current live vertical slice captures:
+
+- `execve` process execution;
+- `openat` file opens;
+- outbound `connect`;
+- IPv4/IPv6 endpoints;
 - process/PID/parent context where available;
-- perf lost-sample and per-probe diagnostics.
+- lost perf samples and per-probe diagnostics.
 
-Tracepoint argument offsets are discovered from the running kernel's tracefs metadata instead of being hard-coded.
+Tracepoint argument offsets are discovered from the running kernel's tracefs metadata rather than hard-coded.
 
-A dedicated GitHub Actions gate mounts/checks tracefs, loads all three eBPF programs, generates real process/file/network behavior, verifies captured RuntimeEvents, and feeds them through the normal snapshot enrichment/fingerprint pipeline.
+A dedicated GitHub Actions workflow loads the actual eBPF programs on a hosted Linux kernel, generates real process/file/network behavior, verifies the events, and feeds them through the standard snapshot enrichment/fingerprint path.
 
 See [`docs/native-ebpf.md`](docs/native-ebpf.md) and [`SECURITY.md`](SECURITY.md).
 
-### Causal Runtime Graph
+---
 
-A deep snapshot can be deterministically transformed into an independently versioned graph artifact:
+## Causal Runtime Graph
+
+A deep snapshot can be deterministically converted into an independent graph artifact:
 
 ```bash
 wabi graph snapshot.deep.json --output graph.json
 ```
 
-The graph models stable workload/process/file/endpoint/domain/syscall nodes and causal relationships such as:
+Schema:
+
+```text
+wabi.graph/v1alpha1
+```
+
+Graph semantics include stable workload/process/file/endpoint/domain/syscall nodes and relationships such as:
 
 ```text
 spawn
+exec
 read
 write
+open
 connect:outbound
+uses
 ```
 
-Compare graphs between releases:
+Compare releases:
 
 ```bash
 wabi graph-diff baseline.graph.json candidate.graph.json
 ```
 
-The graph fingerprint is bound to the verified source snapshot fingerprint. Graph artifacts are derived rather than embedded into snapshots so evidence collection and causal interpretation can evolve independently.
+The graph has its own fingerprint and remains bound to the source snapshot fingerprint.
 
 See [`docs/causal-runtime-graph.md`](docs/causal-runtime-graph.md).
 
-### Deep diff
+---
 
-New normalized runtime evidence is compared semantically rather than as raw provider JSON.
+## Target-aware proof engines
 
-Examples:
+### Docker Compose
 
-```text
-runtime-process / exec
-runtime-file    / open
-runtime-file    / rename
-runtime-network / connect
-runtime-network / listen
-syscall         / io_uring_setup
+Current proof surfaces include:
+
+- `read_only` vs filesystem mutations;
+- writable mounts/tmpfs;
+- memory hard limits;
+- `stop_grace_period`;
+- capability restrictions.
+
+```bash
+wabi compare-snapshots \
+  --target compose.yaml \
+  --service api \
+  baseline.json candidate.json
 ```
 
-New deep process/file/network behavior defaults to `warning`; previously unknown syscall evidence defaults to `info` rather than being discarded.
+### Kubernetes
 
-Policy can make those surfaces stricter without changing the core model.
+Supported workload forms include:
 
-### Target-aware compatibility
-
-Current target adapters:
-
-- Docker Compose;
-- Kubernetes Pod;
+- Pod;
 - Deployment;
 - StatefulSet;
 - DaemonSet;
@@ -303,32 +450,96 @@ Current target adapters:
 - Job;
 - CronJob.
 
-Current constraints include:
+Current proof surfaces include:
 
 - read-only root filesystem and writable mounts;
 - memory limits;
-- shutdown / termination grace period;
-- Linux capability restrictions;
+- termination grace period;
+- capabilities;
 - `runAsNonRoot` / `runAsUser`;
-- privilege-escalation restrictions.
+- privilege escalation restrictions.
 
 Kubernetes JSON is parsed directly. YAML can be normalized client-side with `kubectl`.
 
-### Offline pipeline
-
-Collection and decision do not have to happen in the same process:
-
-```text
-build A -> record -> snapshot A --+
-                                  +-> compare -> target -> policy -> attestation
-build B -> record -> snapshot B --+
+```bash
+wabi compare-snapshots \
+  --target deployment.json \
+  --target-kind kubernetes \
+  --workload payments \
+  --container api \
+  baseline.json candidate.json
 ```
 
-This allows evidence to be stored as a build artifact and evaluated later against multiple environments or policies.
+### Kubernetes NetworkPolicy
 
-### Policy
+Workload ABI can prove newly observed outbound dependencies against selecting NetworkPolicies.
 
-Example:
+Implemented semantics include:
+
+- `matchLabels` / `matchExpressions`;
+- additive selected policies;
+- `ipBlock`, CIDR and `except`;
+- protocols;
+- numeric ports and `endPort`;
+- deny-all egress.
+
+Unresolved destination selectors, named ports and other insufficiently grounded cases remain `unknown`, not false `BREAKING` verdicts.
+
+```bash
+wabi compare-snapshots \
+  --target deployment.json \
+  --target-kind kubernetes \
+  --network-policy egress.json \
+  baseline.json candidate.json
+```
+
+### Amazon ECS
+
+ECS task definitions are parsed directly with no AWS CLI dependency.
+
+Current proof surfaces include:
+
+- `readonlyRootFilesystem`;
+- writable `mountPoints`;
+- task/container hard `memory` limits;
+- explicit `stopTimeout`;
+- Linux capability constraints.
+
+`memoryReservation` is preserved as a soft limit and never treated as a hard compatibility failure.
+
+```bash
+wabi compare-snapshots \
+  --target task-definition.json \
+  --target-kind ecs \
+  --container api \
+  baseline.json candidate.json
+```
+
+### seccomp
+
+Exact observed `category=syscall` requirements can be proven against Docker/OCI-style seccomp profiles.
+
+Conservative action model:
+
+- `ALLOW`, `LOG` → allow;
+- `ERRNO`, `KILL*`, `TRAP` → deny;
+- `TRACE`, `NOTIFY`, argument-conditional or conflicting rules → unknown.
+
+Unknown never becomes a false deployment blocker.
+
+```bash
+wabi compare-snapshots \
+  --seccomp-profile seccomp.json \
+  baseline.json candidate.json
+```
+
+See [`docs/seccomp-proof.md`](docs/seccomp-proof.md) and [`docs/ecs-proof.md`](docs/ecs-proof.md).
+
+---
+
+## Policy
+
+Workload ABI policy composes with environment proof rather than hiding logic in exit codes.
 
 ```json
 {
@@ -340,8 +551,6 @@ Example:
 }
 ```
 
-Run:
-
 ```bash
 wabi compare-snapshots \
   --target compose.yaml \
@@ -349,37 +558,53 @@ wabi compare-snapshots \
   baseline.json candidate.json
 ```
 
-Policy violations are explicit evidence in the result, not hidden exit-code logic.
+---
 
-### CI outputs
+## Portable artifacts and outputs
 
 Workload ABI supports:
 
-- human-readable output;
+- human-readable comparison;
 - JSON;
 - SARIF 2.1.0;
+- verified persisted snapshots;
+- causal graph artifacts;
+- Environment Compatibility Matrix artifacts;
+- self-contained HTML dashboard;
 - in-toto Statement v1 compatibility attestations;
 - CI-safe exit codes.
 
-## Schema versions
+Offline flow:
 
-Current writer schema:
+```text
+build A → record → snapshot A ─┐
+                               ├→ compare → environment proofs → matrix → dashboard
+build B → record → snapshot B ─┘                         │
+                                                        └→ SARIF / in-toto
+```
+
+---
+
+## Schema namespaces
+
+Current snapshot writer:
 
 ```text
 wabi.dev/v1alpha3
 ```
 
-`v1alpha3` adds provider-neutral deep runtime events.
+Backward-compatible persisted `v1alpha2` snapshots and attestations remain readable/verifiable. Published schema meanings are immutable.
 
-Persisted `v1alpha2` snapshots and attestations remain readable/verifiable. The published meaning of `v1alpha2` was not changed.
-
-The causal graph has an independent schema namespace:
+Derived artifact namespaces:
 
 ```text
 wabi.graph/v1alpha1
+wabi.graph-diff/v1alpha1
+wabi.matrix-config/v1alpha1
+wabi.matrix/v1alpha1
 ```
 
-Public schemas include:
+Public schemas:
 
 ```text
 schemas/
@@ -391,12 +616,45 @@ schemas/
 │   ├── policy.schema.json
 │   ├── attestation.schema.json
 │   └── runtime-event.schema.json
-└── graph/v1alpha1/
-    ├── graph.schema.json
-    └── graph-diff.schema.json
+├── graph/v1alpha1/
+│   ├── graph.schema.json
+│   └── graph-diff.schema.json
+└── matrix/v1alpha1/
+    ├── config.schema.json
+    └── matrix.schema.json
 ```
 
-The standalone runtime-event schema is the interoperability contract for third-party sensors.
+The standalone RuntimeEvent schema is the public interoperability boundary for third-party sensors.
+
+---
+
+## CLI quick reference
+
+```text
+wabi compare             BASELINE_IMAGE CANDIDATE_IMAGE
+wabi record              IMAGE
+wabi enrich              --snapshot SNAPSHOT --events EVENTS --format falco|tracee|generic
+wabi compare-snapshots   BASELINE.json CANDIDATE.json
+wabi graph               SNAPSHOT.json
+wabi graph-diff          BASELINE.graph.json CANDIDATE.graph.json
+wabi matrix              --config ENVIRONMENTS.json BASELINE.json CANDIDATE.json
+wabi verify-matrix       MATRIX.json
+wabi dashboard           --matrix MATRIX.json
+wabi attest              COMPARISON.json
+wabi verify-attestation  ATTESTATION.json
+wabi doctor
+wabi version
+```
+
+Comparison/matrix exit codes:
+
+- `0` — completed without a breaking verdict;
+- `3` — changes found when `--fail-on-change` is requested;
+- `4` — a breaking runtime/target/policy/environment regression is proven;
+- `1` — execution/data/verification error;
+- `2` — CLI usage error.
+
+---
 
 ## Install
 
@@ -407,12 +665,13 @@ Core requirements:
 - Go 1.23+
 - Docker Engine / Docker Desktop for live Docker recording
 - Docker Compose v2 for Compose targets
-- `kubectl` only for Kubernetes YAML normalization
+- `kubectl` only when normalizing Kubernetes YAML
 
 ```bash
 git clone https://github.com/riccardomenegazzo/workload-abi.git
 cd workload-abi
 make check
+make build
 ```
 
 Core binary:
@@ -421,23 +680,17 @@ Core binary:
 ./bin/wabi
 ```
 
-On Linux, `make build` also builds:
+On Linux, `make build` also produces:
 
 ```text
 ./bin/wabi-native
 ```
 
-Or explicitly:
+The native provider requires Linux eBPF/tracepoint support, tracefs, and sufficient host privileges.
 
-```bash
-make build-native
-```
+### Releases
 
-The native provider additionally requires Linux eBPF/tracepoint support, tracefs, and sufficient host privilege. See [`docs/native-ebpf.md`](docs/native-ebpf.md).
-
-### Release archives
-
-Tagged releases publish AMD64/ARM64 archives for Linux, macOS, and Windows.
+Tagged releases publish AMD64/ARM64 archives for Linux, macOS and Windows.
 
 Linux archives contain:
 
@@ -446,9 +699,9 @@ wabi
 wabi-native
 ```
 
-macOS and Windows archives contain only the portable `wabi` CLI.
+macOS/Windows archives contain the portable `wabi` CLI.
 
-Every release also publishes checksums and the public schema bundle.
+Releases also publish checksums and public schema bundles.
 
 ### Container
 
@@ -458,152 +711,15 @@ Tagged releases publish a multi-architecture core image to:
 ghcr.io/riccardomenegazzo/workload-abi
 ```
 
-Releases use BuildKit provenance and SBOM generation.
+Release containers use BuildKit provenance and SBOM generation.
 
-The standard container intentionally remains the portable core CLI; the privileged native host provider is distributed as a Linux binary rather than silently adding host-eBPF privileges to the container path.
+The standard container intentionally remains the portable core CLI. Privileged host eBPF capture stays in the separate Linux binary.
 
-Mounting `/var/run/docker.sock` grants the container control of that Docker daemon and must be treated as privileged access. See [`SECURITY.md`](SECURITY.md).
+---
 
-## CLI
+## Integrity, trust and dashboard security
 
-### Live compare
-
-```bash
-wabi compare app:v1 app:v2
-```
-
-### Record
-
-```bash
-wabi record --observe 3s --scenario scenario.json app:v1 > snapshot.json
-```
-
-### Enrich with Falco
-
-```bash
-wabi enrich \
-  --snapshot snapshot.json \
-  --events falco.jsonl \
-  --format falco \
-  --output snapshot.deep.json
-```
-
-### Enrich with Tracee
-
-```bash
-wabi enrich \
-  --snapshot snapshot.json \
-  --events tracee.jsonl \
-  --format tracee \
-  --output snapshot.deep.json
-```
-
-### Record with native Linux eBPF
-
-```bash
-sudo wabi-native record \
-  --duration 10s \
-  --max-events 10000 \
-  --output native-events.json \
-  --stats-output native-stats.json
-
-wabi enrich \
-  --snapshot snapshot.json \
-  --events native-events.json \
-  --format generic \
-  --output snapshot.native.json
-```
-
-### Enrich from any sensor
-
-Emit one normalized RuntimeEvent object per line:
-
-```bash
-wabi enrich \
-  --snapshot snapshot.json \
-  --events custom-ebpf.jsonl \
-  --format generic
-```
-
-A JSON array is accepted by the generic adapter as well.
-
-### Causal graph
-
-```bash
-wabi graph snapshot.deep.json --output graph.json
-wabi graph-diff baseline.graph.json candidate.graph.json
-```
-
-### Offline compare
-
-```bash
-wabi compare-snapshots baseline.json candidate.json
-```
-
-### Compose target
-
-```bash
-wabi compare-snapshots \
-  --target compose.yaml \
-  --service api \
-  baseline.json candidate.json
-```
-
-### Kubernetes target
-
-```bash
-wabi compare-snapshots \
-  --target deployment.yaml \
-  --target-kind kubernetes \
-  --workload payments \
-  --container api \
-  baseline.json candidate.json
-```
-
-### SARIF
-
-```bash
-wabi compare-snapshots \
-  --format sarif \
-  baseline.json candidate.json > wabi.sarif
-```
-
-### Attest
-
-```bash
-wabi compare-snapshots \
-  --format json \
-  baseline.json candidate.json > comparison.json
-
-wabi attest \
-  --output compatibility.intoto.json \
-  comparison.json
-```
-
-Predicate type:
-
-```text
-https://wabi.dev/attestation/compatibility/v1alpha1
-```
-
-Verify internal consistency:
-
-```bash
-wabi verify-attestation compatibility.intoto.json
-```
-
-The built-in verifier checks integrity/consistency, not cryptographic authorship. Use an external trust system such as Sigstore when authenticity is required.
-
-### Doctor
-
-```bash
-wabi doctor
-wabi doctor --json
-```
-
-## Fingerprint model
-
-An image digest answers:
+An OCI image digest answers:
 
 > Which immutable image bytes are these?
 
@@ -611,112 +727,114 @@ A Workload ABI fingerprint answers:
 
 > Which normalized operational interface did this experiment observe?
 
-Therefore image tags, image IDs, PIDs, Falco rule names, provider name, capture timestamps, and noisy point-in-time measurements do not automatically change the Operational ABI.
+Therefore image tags, image IDs, PIDs, provider names, Falco rule names, capture timestamps and noisy point-in-time measurements do not automatically change the Operational ABI.
 
-Behavior such as a new file target, network dependency, executable relation, listener, capability or scenario result does.
+Persisted evidence is fingerprint-verified before use. Causal graphs and matrices have independent fingerprints and explicit snapshot bindings.
 
-Persisted snapshots are fingerprint-verified on load. Deep-evidence tampering is rejected before comparison. Causal graph artifacts have their own fingerprint and remain bound to the verified source snapshot fingerprint.
+Fingerprints establish **integrity**, not cryptographic authorship. External signing/trust systems such as Sigstore belong to the authenticity layer.
 
-## Exit codes
+Dashboard-specific safeguards:
 
-Comparison commands:
+- loopback bind by default (`127.0.0.1:8787`);
+- non-loopback bind requires `--allow-remote`;
+- restrictive Content Security Policy;
+- no external CDN/runtime dependency;
+- matrix and graph verification before rendering;
+- no-cache HTTP responses.
 
-- `0` — completed with no breaking verdict;
-- `3` — changes were found and `--fail-on-change` was requested;
-- `4` — a breaking runtime regression, target conflict, or policy violation was proven;
-- `1` — execution/data/verification error;
-- `2` — CLI usage error.
+Runtime artifacts may reveal internal file paths, process names, destinations and deployment topology. Treat dashboard exposure accordingly.
+
+See [`SECURITY.md`](SECURITY.md).
+
+---
 
 ## Design principles
 
 1. **Observe, do not guess.** Runtime evidence is first-class.
 2. **Same experiment, two releases.** Equivalent stimuli are required for meaningful comparison.
-3. **Normalize before diffing.** Raw Falco, Tracee, Docker, native eBPF, or other telemetry must not leak into compatibility semantics.
-4. **Provider-neutral identity.** Sensor-specific diagnostics do not define the Operational ABI.
-5. **Difference is not breakage.** Target and policy context determine impact.
-6. **Explain every verdict.** Every compatibility decision points to concrete evidence.
-7. **Keep collection pluggable.** A deeper sensor should enrich the snapshot, not fork the compatibility engine.
-8. **Derive causal meaning separately.** Graph semantics must not mutate evidence artifacts.
-9. **Preserve old artifacts.** Published schema versions are immutable contracts.
-10. **Separate integrity from authenticity.** Fingerprints detect evidence modification; signatures establish trust.
+3. **Normalize before diffing.** Provider-specific telemetry must not leak into compatibility semantics.
+4. **Provider-neutral identity.** Sensor diagnostics do not define the Operational ABI.
+5. **Difference is not breakage.** Environment and policy context determine deployment impact.
+6. **Unknown is not breaking.** Incomplete evidence must not manufacture confidence.
+7. **Explain every verdict.** Every blocker points to concrete normalized evidence.
+8. **Keep collection pluggable.** A deeper sensor enriches evidence rather than forking the compatibility engine.
+9. **Derive meaning separately.** Graph and matrix artifacts do not mutate the source snapshot.
+10. **Preserve old artifacts.** Published schema versions are immutable contracts.
+11. **Separate integrity from authenticity.** Fingerprints detect modification; signatures establish trust.
+
+---
+
+## CI proof, not screenshots
+
+The repository continuously proves the architecture end-to-end.
+
+Current workflows verify:
+
+- format, schema validation, `go vet`, race/unit tests and builds;
+- Docker experiment recording;
+- Falco and Tracee normalization;
+- causal graph generation and tamper detection;
+- live native eBPF loading/capture on Linux;
+- Linux AMD64/ARM64 native packaging;
+- Compose target solving;
+- Kubernetes NetworkPolicy proof;
+- seccomp proof;
+- ECS task-definition proof;
+- in-toto round trip;
+- SARIF generation;
+- Environment Compatibility Matrix with four different deployment outcomes;
+- matrix tamper detection;
+- graph-to-matrix snapshot binding;
+- self-contained dashboard export;
+- live local dashboard server, `/healthz`, and CSP headers.
+
+The dashboard is therefore a visualization of artifacts already proven by the CLI, not a second source of truth.
+
+---
 
 ## Documentation
 
 - [`docs/specification.md`](docs/specification.md) — Operational ABI semantics.
-- [`docs/architecture.md`](docs/architecture.md) — internal boundaries and pipeline.
+- [`docs/architecture.md`](docs/architecture.md) — implementation boundaries and pipeline.
 - [`docs/deep-evidence.md`](docs/deep-evidence.md) — provider contract and normalization.
 - [`docs/native-ebpf.md`](docs/native-ebpf.md) — native Linux provider and privilege boundary.
-- [`docs/causal-runtime-graph.md`](docs/causal-runtime-graph.md) — deterministic causal artifact semantics.
+- [`docs/causal-runtime-graph.md`](docs/causal-runtime-graph.md) — causal artifact semantics.
+- [`docs/seccomp-proof.md`](docs/seccomp-proof.md) — conservative syscall/seccomp proof.
+- [`docs/ecs-proof.md`](docs/ecs-proof.md) — ECS target semantics.
+- [`docs/deployability-dashboard.md`](docs/deployability-dashboard.md) — matrix, dashboard and graph correlation.
 - [`docs/roadmap.md`](docs/roadmap.md) — maturity gates toward 1.0.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution rules.
 - [`SECURITY.md`](SECURITY.md) — threat model and safe execution guidance.
 
-## Reproduce the repository deep-evidence proof
-
-```bash
-make build
-
-docker build -t wabi-demo:v1 ./examples/demo/v1
-docker build -t wabi-demo:v2 ./examples/demo/v2
-
-./bin/wabi record \
-  --observe 500ms \
-  --scenario ./examples/demo/scenario.json \
-  wabi-demo:v1 > /tmp/baseline.json
-
-./bin/wabi record \
-  --observe 500ms \
-  --scenario ./examples/demo/scenario.json \
-  wabi-demo:v2 > /tmp/candidate.json
-
-./bin/wabi enrich \
-  --snapshot /tmp/baseline.json \
-  --events ./examples/deep/falco-baseline.jsonl \
-  --format falco \
-  --output /tmp/baseline.deep.json
-
-./bin/wabi enrich \
-  --snapshot /tmp/candidate.json \
-  --events ./examples/deep/falco-candidate.jsonl \
-  --format falco \
-  --output /tmp/candidate.deep.json
-
-./bin/wabi compare-snapshots \
-  --fail-on-change \
-  /tmp/baseline.deep.json /tmp/candidate.deep.json
-```
-
-The candidate fixture introduces:
-
-```text
-telemetry.example.com:443
-```
-
-as a new outbound runtime dependency. CI proves that Falco and Tracee evidence is normalized into provider-neutral facts, while the dedicated Native eBPF workflow proves that the same public boundary can also be populated by live kernel observation.
+---
 
 ## Roadmap
 
-Delivered foundations now include:
+Delivered foundations now form this chain:
 
 ```text
 portable persisted evidence
         ↓
-provider-neutral deep RuntimeEvent
+provider-neutral RuntimeEvent
         ↓
 causal runtime graph
         ↓
 optional native Linux eBPF recorder
+        ↓
+Compose / Kubernetes / NetworkPolicy / ECS / seccomp proofs
+        ↓
+Environment Compatibility Matrix
+        ↓
+Deployability Dashboard
 ```
 
-The next major stage is **environment proof expansion**: use the evidence and graph already captured to solve more production constraints, including seccomp, AppArmor, Kubernetes NetworkPolicy, Pod Security, Helm-rendered targets, and richer deployment semantics.
-
-After that, the roadmap moves toward signed OCI/Sigstore compatibility and causal evidence.
+The next major stage is **supply-chain trust integration**: bind image digest, Operational ABI fingerprint, causal graph fingerprint and matrix fingerprint into signed OCI/Sigstore-compatible deployment evidence.
 
 See [`docs/roadmap.md`](docs/roadmap.md).
 
 The 1.0 goal is not “another container security CLI.”
 
-The goal is a portable, independently implementable **Operational ABI** for software workloads.
+The goal is a portable, independently implementable **Operational ABI for software workloads**.
 
 ## License
 
