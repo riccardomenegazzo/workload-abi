@@ -108,7 +108,7 @@ func parseKubernetesNetworkPolicy(obj map[string]any) (KubernetesNetworkPolicy, 
 
 	policyTypes := stringSlice(spec["policyTypes"])
 	if len(policyTypes) == 0 {
-		_, p.EgressIsolating = spec["egress"]
+		p.EgressIsolating = len(sliceValue(spec["egress"])) > 0
 	} else {
 		for _, policyType := range policyTypes {
 			if strings.EqualFold(policyType, "Egress") {
