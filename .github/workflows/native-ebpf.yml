@@ -1,0 +1,105 @@
+name: Native eBPF
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native-ebpf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Download modules
+        run: go mod download
+      - name: Unit tests
+        run: go test -race ./internal/nativeebpf
+      - name: Build native provider
+        run: go build -trimpath -o ./bin/wabi-native ./cmd/wabi-native
+      - name: Cross-build native provider for Linux ARM64
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/wabi-native-linux-arm64 ./cmd/wabi-native
+      - name: Prove Linux release packaging
+        shell: bash
+        env:
+          VERSION: ci
+          DIST_DIR: /tmp/wabi-release
+          WABI_RELEASE_PLATFORMS: linux/amd64 linux/arm64
+          WABI_RELEASE_INCLUDE_SCHEMAS: "false"
+        run: |
+          bash ./scripts/build-release-artifacts.sh
+          test -s /tmp/wabi-release/checksums.txt
+          test -s /tmp/wabi-release/wabi_ci_linux_amd64.tar.gz
+          test -s /tmp/wabi-release/wabi_ci_linux_arm64.tar.gz
+      - name: Build core CLI
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Prepare tracefs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! mountpoint -q /sys/kernel/tracing; then
+            sudo mount -t tracefs tracefs /sys/kernel/tracing
+          fi
+
+          sudo test -r /sys/kernel/tracing/events/syscalls/sys_enter_execve/format
+          sudo test -r /sys/kernel/tracing/events/syscalls/sys_enter_openat/format
+          sudo test -r /sys/kernel/tracing/events/syscalls/sys_enter_connect/format
+      - name: Prove live native eBPF collection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo ./bin/wabi-native record \
+            --duration 4s \
+            --max-events 5000 \
+            --output /tmp/native-events.json \
+            --stats-output /tmp/native-stats.json &
+          recorder_pid=$!
+
+          sleep 1
+          /bin/sh -c 'cat /etc/hostname >/dev/null'
+          /usr/bin/true
+          python3 - <<'PY'
+          import socket
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          s.settimeout(0.2)
+          try:
+              s.connect(("127.0.0.1", 9))
+          except OSError:
+              pass
+          finally:
+              s.close()
+          PY
+
+          wait "$recorder_pid"
+
+          cat /tmp/native-stats.json
+          jq -e '.captured > 0' /tmp/native-stats.json
+          jq -e '[.probes[] | select(.available == true)] | length == 3' /tmp/native-stats.json
+          jq -e '[.[] | select(.source == "native-ebpf")] | length > 0' /tmp/native-events.json
+          jq -e '[.[] | select(.category == "process" and .operation == "exec")] | length > 0' /tmp/native-events.json
+          jq -e '[.[] | select(.category == "file" and .operation == "open")] | length > 0' /tmp/native-events.json
+          jq -e '[.[] | select(.category == "network" and .operation == "connect" and .direction == "outbound")] | length > 0' /tmp/native-events.json
+      - name: Prove interoperability with core evidence pipeline
+        shell: bash
+        run: |
+          docker build -t wabi-native-demo:v1 ./examples/demo/v1
+          ./bin/wabi record --observe 250ms wabi-native-demo:v1 > /tmp/native-base.json
+          ./bin/wabi enrich \
+            --snapshot /tmp/native-base.json \
+            --events /tmp/native-events.json \
+            --format generic \
+            --output /tmp/native-enriched.json
+
+          grep -q '"schema_version": "wabi.dev/v1alpha3"' /tmp/native-enriched.json
+          grep -q '"source": "native-ebpf"' /tmp/native-enriched.json
+          grep -q '"runtime_events"' /tmp/native-enriched.json
+          grep -q '"fingerprint": "sha256:' /tmp/native-enriched.json

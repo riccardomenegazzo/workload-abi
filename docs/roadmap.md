@@ -58,24 +58,41 @@ Delivered:
 
 The graph is intentionally a **derived artifact**, not a snapshot field. Evidence collection and causal interpretation can therefore evolve independently.
 
-## v0.6 — Native optional deep recorder
+## v0.6 — Native optional deep recorder ✅
 
-Goal: capture richer Linux runtime evidence directly while preserving the public RuntimeEvent boundary proven by external providers.
+Goal: prove that Workload ABI can capture Linux runtime evidence directly without creating a second compatibility model.
 
-Planned:
+Delivered vertical slice:
 
-- optional CO-RE/eBPF Linux provider;
-- process lifecycle and parent/child identity;
-- file open/read/write/rename/unlink activity;
-- TCP connect/accept/listen evidence;
+- standalone optional Linux `wabi-native` binary;
+- native eBPF tracepoint programs built with `cilium/ebpf`;
+- runtime discovery of tracepoint argument offsets from tracefs metadata;
+- `execve` process evidence with executable path;
+- `openat` file evidence with pathname;
+- outbound `connect` evidence with IPv4/IPv6 endpoint decoding;
+- process/PID/parent context where available;
+- bounded collection window and unique-event cap;
+- perf lost-sample accounting;
+- per-probe load/attach diagnostics;
+- direct normalization into the existing public `RuntimeEvent` contract;
+- ingestion through the existing `wabi enrich --format generic` path;
+- live-kernel GitHub Actions proof that all three probes attach and capture real events;
+- end-to-end proof that native evidence survives snapshot enrichment and fingerprinting;
+- Linux AMD64 and ARM64 release builds for the native provider.
+
+The architectural gate is therefore complete: **native collection changes the evidence source, not compatibility semantics**.
+
+The following deeper native coverage remains intentionally incremental rather than being required to validate the provider boundary:
+
+- fork/clone/exit lifecycle;
+- file read/write/rename/unlink semantics;
+- TCP accept/listen;
 - DNS queries and resolved destinations;
-- syscall/capability requirements;
+- syscall/capability requirement evidence;
 - container/cgroup attribution;
-- bounded event collection and drop accounting;
-- deterministic normalization into the existing `RuntimeEvent` schema;
-- equivalence tests against Falco/Tracee/generic evidence for the same behavior.
+- cross-provider equivalence corpus for the same live workload.
 
-The native recorder must not create a second compatibility engine.
+See [`native-ebpf.md`](native-ebpf.md).
 
 ## v0.7 — Environment proof expansion
 

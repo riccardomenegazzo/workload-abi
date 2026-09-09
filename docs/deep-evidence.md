@@ -4,7 +4,7 @@ Workload ABI separates **execution** from **observation**.
 
 Docker is currently the reference experiment runner. Deep runtime sensors are evidence providers: they can enrich a persisted Workload ABI snapshot without taking ownership of comparison, target solving, policy, or compatibility semantics.
 
-This lets the project use real eBPF-derived evidence from Falco, Tracee, or another sensor while remaining vendor-neutral.
+This lets the project use real eBPF-derived evidence from Falco, Tracee, the optional native Linux provider, or another sensor while remaining provider-neutral.
 
 ## Enrichment flow
 
@@ -12,18 +12,18 @@ This lets the project use real eBPF-derived evidence from Falco, Tracee, or anot
 Docker experiment
       |
       v
-snapshot.json -------------------+
-                                 |
-Falco / Tracee / custom sensor --+--> normalize --> v1alpha3 snapshot
-                                                    |
-                                                    v
-                                               fingerprint
-                                                    |
-                                                    v
-                                           semantic compatibility
+snapshot.json ------------------------------+
+                                            |
+Falco / Tracee / wabi-native / custom ------+--> normalize --> v1alpha3 snapshot
+                                                               |
+                                                               v
+                                                          fingerprint
+                                                               |
+                                                               v
+                                                      semantic compatibility
 ```
 
-Example:
+Example with an external provider:
 
 ```bash
 wabi record --scenario scenario.json app:v2 > candidate.json
@@ -32,6 +32,21 @@ wabi enrich \
   --snapshot candidate.json \
   --events falco.jsonl \
   --format falco \
+  --output candidate.deep.json
+```
+
+Example with the native Linux provider:
+
+```bash
+sudo wabi-native record \
+  --duration 10s \
+  --output native-events.json \
+  --stats-output native-stats.json
+
+wabi enrich \
+  --snapshot candidate.json \
+  --events native-events.json \
+  --format generic \
   --output candidate.deep.json
 ```
 
@@ -86,7 +101,18 @@ The following are diagnostics and deliberately **do not** participate in semanti
 - `pid`;
 - `rule`.
 
-That distinction is essential. The same behavior observed by Falco with PID 42 and Tracee with PID 991 must represent the same Operational ABI fact.
+That distinction is essential. The same behavior observed by Falco with PID 42, Tracee with PID 991, or `wabi-native` with another PID must represent the same Operational ABI fact.
+
+## Provider matrix
+
+| Provider | Input | Integration boundary |
+|---|---|---|
+| Falco | Falco JSON alert stream | `wabi enrich --format falco` |
+| Tracee | Tracee JSON event stream | `wabi enrich --format tracee` |
+| Native eBPF | normalized `RuntimeEvent` JSON array from `wabi-native` | `wabi enrich --format generic` |
+| Generic | normalized `RuntimeEvent` JSONL/array from any sensor | `wabi enrich --format generic` |
+
+The native provider intentionally uses the generic ingestion path because its output is already the public normalized contract. A private native-only adapter would weaken the interoperability model.
 
 ## Generic provider
 
@@ -130,6 +156,22 @@ The adapter reads:
 - `processId` as diagnostic context;
 - `args[]` for path/address/protocol targets.
 
+## Native Linux eBPF provider
+
+`wabi-native` is an optional Linux-only collector that emits `RuntimeEvent` directly.
+
+The v0.6 vertical slice observes:
+
+- `execve` process execution;
+- `openat` file opens;
+- outbound `connect` calls with IPv4/IPv6 destination decoding.
+
+Tracepoint field offsets are discovered from the active kernel's tracefs metadata instead of being hard-coded. The provider has bounded collection, perf lost-sample accounting, and per-probe diagnostics.
+
+It is intentionally a separate binary so the core `wabi` CLI remains portable and does not require eBPF privileges.
+
+See [`native-ebpf.md`](native-ebpf.md) for requirements, privilege boundaries, and live examples.
+
 ## Event classification
 
 Known operations are normalized into broad provider-neutral categories.
@@ -168,8 +210,10 @@ Deep event streams can contain sensitive paths, commands, network destinations, 
 
 Provider event files are treated as untrusted input. Workload ABI parses them as data and does not execute commands from the event stream.
 
-## Future native eBPF provider
+Native collection is different from offline ingestion because loading eBPF programs is privileged host instrumentation. See [`../SECURITY.md`](../SECURITY.md) before using `wabi-native` on sensitive systems.
 
-A native eBPF recorder may be added after this provider boundary is proven stable. It should emit the same normalized evidence contract rather than introducing a separate compatibility engine.
+## Provider independence
 
-The purpose of v0.4 is therefore not to claim ownership of eBPF collection. It is to make **eBPF-derived behavior portable across sensors and meaningful to operational compatibility**.
+The purpose of the deep-evidence layer is not to make Workload ABI own every eBPF sensor. It is to make **runtime-derived behavior portable across sensors and meaningful to operational compatibility**.
+
+Falco, Tracee, `wabi-native`, and future providers must converge on the same public semantic model. A new sensor should improve observation fidelity without forking comparison, policy, target solving, fingerprinting, or causal-graph semantics.

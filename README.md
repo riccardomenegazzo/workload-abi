@@ -3,11 +3,12 @@
 > **Your API didn't change. Your tests pass. Your image builds. Production can still break.**
 
 [![CI](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/ci.yml/badge.svg)](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/ci.yml)
+[![Native eBPF](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/native-ebpf.yml/badge.svg)](https://github.com/riccardomenegazzo/workload-abi/actions/workflows/native-ebpf.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Workload ABI (`wabi`) discovers operational breaking changes between container releases.**
 
-It executes two workload versions under equivalent conditions, captures normalized runtime evidence, enriches that evidence with optional deep runtime sensors, computes a semantic difference, and tests the candidate against the environment where it is expected to run.
+It executes two workload versions under equivalent conditions, captures normalized runtime evidence, optionally enriches that evidence with independent deep runtime sensors, derives a causal runtime graph, computes semantic differences, and tests the candidate against the environment where it is expected to run.
 
 ```text
                          same experiment
@@ -21,12 +22,12 @@ It executes two workload versions under equivalent conditions, captures normaliz
                  |                         |
           snapshot / fingerprint     snapshot / fingerprint
                  |                         |
-        optional deep sensors      optional deep sensors
-        Falco / Tracee / custom    Falco / Tracee / custom
+       optional deep evidence      optional deep evidence
+   Falco / Tracee / wabi-native   Falco / Tracee / custom
                  |                         |
                  +------------+------------+
                               |
-                        semantic diff
+                  semantic diff + causal graph
                               |
                  +------------+------------+
                  |                         |
@@ -44,7 +45,7 @@ This is **not** an SBOM scanner, vulnerability scanner, attack simulator, or raw
 
 It answers a different question:
 
-> **Did this release change its operational interface, and will that change break the environment where it runs?**
+> **Did this release change its operational interface, why did it change, and will that change break the environment where it runs?**
 
 ## Why this exists
 
@@ -71,7 +72,7 @@ wabi record --scenario scenario.json app:1.8.3 > baseline.json
 wabi record --scenario scenario.json app:1.8.4 > candidate.json
 ```
 
-Optionally enrich both snapshots with real eBPF-derived runtime evidence. Falco is one supported provider:
+Optionally enrich both snapshots with real deep runtime evidence. Falco is one supported provider:
 
 ```bash
 wabi enrich \
@@ -87,7 +88,22 @@ wabi enrich \
   --output candidate.deep.json
 ```
 
-Compare them:
+Or capture normalized evidence directly on Linux with the optional native provider:
+
+```bash
+sudo wabi-native record \
+  --duration 10s \
+  --output native-events.json \
+  --stats-output native-stats.json
+
+wabi enrich \
+  --snapshot candidate.json \
+  --events native-events.json \
+  --format generic \
+  --output candidate.native.json
+```
+
+Compare snapshots against a deployment target:
 
 ```bash
 wabi compare-snapshots \
@@ -160,7 +176,7 @@ Every persisted snapshot has a SHA-256 **Operational ABI fingerprint**.
 
 The fingerprint represents normalized compatibility-relevant behavior. It deliberately does not pretend to be an OCI image digest.
 
-### Deep runtime evidence
+### Provider-neutral deep runtime evidence
 
 `wabi enrich` can merge event-level runtime evidence into a verified snapshot:
 
@@ -172,17 +188,18 @@ wabi enrich \
   --output snapshot.deep.json
 ```
 
-Current provider adapters:
+Current evidence providers:
 
 | Provider | Input | Role |
 |---|---|---|
 | **Falco** | JSON alert stream | eBPF/syscall-derived runtime evidence |
 | **Tracee** | JSON event stream | eBPF runtime evidence |
-| **Generic** | Workload ABI RuntimeEvent JSONL/array | any custom sensor |
+| **wabi-native** | normalized RuntimeEvent JSON array | optional native Linux eBPF recorder |
+| **Generic** | RuntimeEvent JSONL/array | any custom or third-party sensor |
 
-Docker, Falco, and Tracee are not embedded into compatibility semantics. They are evidence sources.
+Docker, Falco, Tracee, and the native provider are not embedded into compatibility semantics. They are evidence sources.
 
-The provider-neutral `RuntimeEvent` identity includes:
+The provider-neutral `RuntimeEvent` semantic identity includes:
 
 ```text
 category
@@ -204,9 +221,55 @@ rule
 
 are intentionally excluded from semantic identity and the operational fingerprint.
 
-That means the same file open observed by Falco with PID `42` and Tracee with PID `9001` is still the same Operational ABI fact.
+That means the same file open observed by Falco with PID `42`, Tracee with PID `9001`, or the native recorder with another PID is still the same Operational ABI fact.
 
 See [`docs/deep-evidence.md`](docs/deep-evidence.md).
+
+### Native Linux eBPF recorder
+
+`wabi-native` is a separate optional binary. It keeps privileged host observation out of the portable core CLI while emitting the same public `RuntimeEvent` contract.
+
+The v0.6 live vertical slice captures:
+
+- process execution through `sys_enter_execve`;
+- file opens through `sys_enter_openat`;
+- outbound socket connects through `sys_enter_connect`;
+- IPv4 and IPv6 endpoint data;
+- process/PID/parent context where available;
+- perf lost-sample and per-probe diagnostics.
+
+Tracepoint argument offsets are discovered from the running kernel's tracefs metadata instead of being hard-coded.
+
+A dedicated GitHub Actions gate mounts/checks tracefs, loads all three eBPF programs, generates real process/file/network behavior, verifies captured RuntimeEvents, and feeds them through the normal snapshot enrichment/fingerprint pipeline.
+
+See [`docs/native-ebpf.md`](docs/native-ebpf.md) and [`SECURITY.md`](SECURITY.md).
+
+### Causal Runtime Graph
+
+A deep snapshot can be deterministically transformed into an independently versioned graph artifact:
+
+```bash
+wabi graph snapshot.deep.json --output graph.json
+```
+
+The graph models stable workload/process/file/endpoint/domain/syscall nodes and causal relationships such as:
+
+```text
+spawn
+read
+write
+connect:outbound
+```
+
+Compare graphs between releases:
+
+```bash
+wabi graph-diff baseline.graph.json candidate.graph.json
+```
+
+The graph fingerprint is bound to the verified source snapshot fingerprint. Graph artifacts are derived rather than embedded into snapshots so evidence collection and causal interpretation can evolve independently.
+
+See [`docs/causal-runtime-graph.md`](docs/causal-runtime-graph.md).
 
 ### Deep diff
 
@@ -310,18 +373,27 @@ wabi.dev/v1alpha3
 
 Persisted `v1alpha2` snapshots and attestations remain readable/verifiable. The published meaning of `v1alpha2` was not changed.
 
-Public schemas:
+The causal graph has an independent schema namespace:
+
+```text
+wabi.graph/v1alpha1
+```
+
+Public schemas include:
 
 ```text
 schemas/
 ├── v1alpha2/
-└── v1alpha3/
-    ├── snapshot.schema.json
-    ├── comparison.schema.json
-    ├── scenario.schema.json
-    ├── policy.schema.json
-    ├── attestation.schema.json
-    └── runtime-event.schema.json
+├── v1alpha3/
+│   ├── snapshot.schema.json
+│   ├── comparison.schema.json
+│   ├── scenario.schema.json
+│   ├── policy.schema.json
+│   ├── attestation.schema.json
+│   └── runtime-event.schema.json
+└── graph/v1alpha1/
+    ├── graph.schema.json
+    └── graph-diff.schema.json
 ```
 
 The standalone runtime-event schema is the interoperability contract for third-party sensors.
@@ -330,10 +402,10 @@ The standalone runtime-event schema is the interoperability contract for third-p
 
 ### Source
 
-Requirements:
+Core requirements:
 
 - Go 1.23+
-- Docker Engine / Docker Desktop for live recording
+- Docker Engine / Docker Desktop for live Docker recording
 - Docker Compose v2 for Compose targets
 - `kubectl` only for Kubernetes YAML normalization
 
@@ -343,21 +415,52 @@ cd workload-abi
 make check
 ```
 
-Binary:
+Core binary:
 
 ```text
 ./bin/wabi
 ```
 
+On Linux, `make build` also builds:
+
+```text
+./bin/wabi-native
+```
+
+Or explicitly:
+
+```bash
+make build-native
+```
+
+The native provider additionally requires Linux eBPF/tracepoint support, tracefs, and sufficient host privilege. See [`docs/native-ebpf.md`](docs/native-ebpf.md).
+
+### Release archives
+
+Tagged releases publish AMD64/ARM64 archives for Linux, macOS, and Windows.
+
+Linux archives contain:
+
+```text
+wabi
+wabi-native
+```
+
+macOS and Windows archives contain only the portable `wabi` CLI.
+
+Every release also publishes checksums and the public schema bundle.
+
 ### Container
 
-Tagged releases publish a multi-architecture image to:
+Tagged releases publish a multi-architecture core image to:
 
 ```text
 ghcr.io/riccardomenegazzo/workload-abi
 ```
 
 Releases use BuildKit provenance and SBOM generation.
+
+The standard container intentionally remains the portable core CLI; the privileged native host provider is distributed as a Linux binary rather than silently adding host-eBPF privileges to the container path.
 
 Mounting `/var/run/docker.sock` grants the container control of that Docker daemon and must be treated as privileged access. See [`SECURITY.md`](SECURITY.md).
 
@@ -395,6 +498,22 @@ wabi enrich \
   --output snapshot.deep.json
 ```
 
+### Record with native Linux eBPF
+
+```bash
+sudo wabi-native record \
+  --duration 10s \
+  --max-events 10000 \
+  --output native-events.json \
+  --stats-output native-stats.json
+
+wabi enrich \
+  --snapshot snapshot.json \
+  --events native-events.json \
+  --format generic \
+  --output snapshot.native.json
+```
+
 ### Enrich from any sensor
 
 Emit one normalized RuntimeEvent object per line:
@@ -407,6 +526,13 @@ wabi enrich \
 ```
 
 A JSON array is accepted by the generic adapter as well.
+
+### Causal graph
+
+```bash
+wabi graph snapshot.deep.json --output graph.json
+wabi graph-diff baseline.graph.json candidate.graph.json
+```
 
 ### Offline compare
 
@@ -489,7 +615,7 @@ Therefore image tags, image IDs, PIDs, Falco rule names, provider name, capture 
 
 Behavior such as a new file target, network dependency, executable relation, listener, capability or scenario result does.
 
-Persisted snapshots are fingerprint-verified on load. Deep-evidence tampering is rejected before comparison.
+Persisted snapshots are fingerprint-verified on load. Deep-evidence tampering is rejected before comparison. Causal graph artifacts have their own fingerprint and remain bound to the verified source snapshot fingerprint.
 
 ## Exit codes
 
@@ -505,19 +631,22 @@ Comparison commands:
 
 1. **Observe, do not guess.** Runtime evidence is first-class.
 2. **Same experiment, two releases.** Equivalent stimuli are required for meaningful comparison.
-3. **Normalize before diffing.** Raw Falco, Tracee, Docker, or other telemetry must not leak into compatibility semantics.
+3. **Normalize before diffing.** Raw Falco, Tracee, Docker, native eBPF, or other telemetry must not leak into compatibility semantics.
 4. **Provider-neutral identity.** Sensor-specific diagnostics do not define the Operational ABI.
 5. **Difference is not breakage.** Target and policy context determine impact.
 6. **Explain every verdict.** Every compatibility decision points to concrete evidence.
 7. **Keep collection pluggable.** A deeper sensor should enrich the snapshot, not fork the compatibility engine.
-8. **Preserve old artifacts.** Published schema versions are immutable contracts.
-9. **Separate integrity from authenticity.** Fingerprints detect evidence modification; signatures establish trust.
+8. **Derive causal meaning separately.** Graph semantics must not mutate evidence artifacts.
+9. **Preserve old artifacts.** Published schema versions are immutable contracts.
+10. **Separate integrity from authenticity.** Fingerprints detect evidence modification; signatures establish trust.
 
 ## Documentation
 
 - [`docs/specification.md`](docs/specification.md) — Operational ABI semantics.
 - [`docs/architecture.md`](docs/architecture.md) — internal boundaries and pipeline.
-- [`docs/deep-evidence.md`](docs/deep-evidence.md) — provider contract and Falco/Tracee normalization.
+- [`docs/deep-evidence.md`](docs/deep-evidence.md) — provider contract and normalization.
+- [`docs/native-ebpf.md`](docs/native-ebpf.md) — native Linux provider and privilege boundary.
+- [`docs/causal-runtime-graph.md`](docs/causal-runtime-graph.md) — deterministic causal artifact semantics.
 - [`docs/roadmap.md`](docs/roadmap.md) — maturity gates toward 1.0.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution rules.
 - [`SECURITY.md`](SECURITY.md) — threat model and safe execution guidance.
@@ -563,23 +692,27 @@ The candidate fixture introduces:
 telemetry.example.com:443
 ```
 
-as a new outbound runtime dependency. The CI gate proves that the Falco event stream is normalized, fingerprinted, persisted, and surfaced as a provider-neutral `runtime-network` Operational ABI change.
-
-A separate CI step runs the same normalization boundary against Tracee JSON.
+as a new outbound runtime dependency. CI proves that Falco and Tracee evidence is normalized into provider-neutral facts, while the dedicated Native eBPF workflow proves that the same public boundary can also be populated by live kernel observation.
 
 ## Roadmap
 
-The provider-neutral deep-evidence boundary is intentionally implemented **before** a native eBPF collector. The next stages can therefore deepen sensing without redesigning the compatibility engine:
+Delivered foundations now include:
 
-- native optional eBPF recorder;
-- outbound DNS dependency normalization;
-- process/file/network causal graph;
-- syscall/kernel requirement model;
-- seccomp and AppArmor solving;
-- Kubernetes NetworkPolicy solving;
-- Helm-rendered targets;
-- signed OCI/Sigstore compatibility attestations;
-- external producers/consumers of the RuntimeEvent schema.
+```text
+portable persisted evidence
+        ↓
+provider-neutral deep RuntimeEvent
+        ↓
+causal runtime graph
+        ↓
+optional native Linux eBPF recorder
+```
+
+The next major stage is **environment proof expansion**: use the evidence and graph already captured to solve more production constraints, including seccomp, AppArmor, Kubernetes NetworkPolicy, Pod Security, Helm-rendered targets, and richer deployment semantics.
+
+After that, the roadmap moves toward signed OCI/Sigstore compatibility and causal evidence.
+
+See [`docs/roadmap.md`](docs/roadmap.md).
 
 The 1.0 goal is not “another container security CLI.”
 

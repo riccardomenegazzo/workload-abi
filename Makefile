@@ -1,11 +1,23 @@
 BINARY := bin/wabi
+NATIVE_BINARY := bin/wabi-native
 IMAGE ?= workload-abi:dev
 VERSION ?= dev
+HOST_GOOS := $(shell go env GOOS)
 
-.PHONY: build test vet fmt fmt-check schemas-check check docker-build clean
+.PHONY: build build-native test vet fmt fmt-check schemas-check check docker-build clean
 
 build:
 	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/wabi
+	@if [ "$(HOST_GOOS)" = "linux" ]; then \
+		go build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(NATIVE_BINARY) ./cmd/wabi-native; \
+	fi
+
+build-native:
+	@if [ "$(HOST_GOOS)" != "linux" ]; then \
+		echo "wabi-native is supported only on Linux" >&2; \
+		exit 1; \
+	fi
+	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(NATIVE_BINARY) ./cmd/wabi-native
 
 test:
 	go test -race ./...
