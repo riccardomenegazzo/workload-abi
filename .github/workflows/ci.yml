@@ -114,7 +114,9 @@ jobs:
           path = "/tmp/candidate.json"
           with open(path) as f:
               data = json.load(f)
-          data["image"] = data["image"] + "-tampered"
+          if not data.get("filesystem"):
+              raise SystemExit("candidate fixture must contain fingerprinted filesystem evidence")
+          data["filesystem"][0]["path"] = data["filesystem"][0]["path"] + "-tampered"
           with open("/tmp/candidate-tampered.json", "w") as f:
               json.dump(data, f)
           PY
@@ -124,7 +126,7 @@ jobs:
           set -e
           cat /tmp/tamper.out
           test "$code" -eq 1
-          grep -qi 'fingerprint' /tmp/tamper.out
+          grep -qi 'fingerprint mismatch' /tmp/tamper.out
       - name: Prove in-toto attestation round trip
         shell: bash
         run: |
