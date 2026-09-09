@@ -2,7 +2,19 @@ package model
 
 import "time"
 
-const SchemaVersion = "wabi.dev/v1alpha2"
+const (
+	SchemaVersionV1Alpha2 = "wabi.dev/v1alpha2"
+	SchemaVersion         = "wabi.dev/v1alpha3"
+)
+
+func IsSupportedSchema(version string) bool {
+	switch version {
+	case "", SchemaVersionV1Alpha2, SchemaVersion:
+		return true
+	default:
+		return false
+	}
+}
 
 type Snapshot struct {
 	SchemaVersion string               `json:"schema_version"`
@@ -14,6 +26,7 @@ type Snapshot struct {
 	Processes     []Process            `json:"processes,omitempty"`
 	Filesystem    []FilesystemChange   `json:"filesystem,omitempty"`
 	Listeners     []Listener           `json:"listeners,omitempty"`
+	RuntimeEvents []RuntimeEvent       `json:"runtime_events,omitempty"`
 	ScenarioSteps []ScenarioStepResult `json:"scenario_steps,omitempty"`
 	ImageConfig   ImageConfig          `json:"image_config"`
 	Runtime       RuntimeFacts         `json:"runtime"`
@@ -34,6 +47,27 @@ type FilesystemChange struct {
 type Listener struct {
 	Protocol string `json:"protocol"`
 	Port     int    `json:"port"`
+}
+
+// RuntimeEvent is provider-neutral deep runtime evidence. Fields such as Source,
+// PID and Rule preserve diagnostics but are deliberately excluded from the
+// semantic identity used by compatibility diffing and operational fingerprints.
+type RuntimeEvent struct {
+	Source        string `json:"source,omitempty"`
+	Category      string `json:"category"`
+	Operation     string `json:"operation"`
+	Process       string `json:"process,omitempty"`
+	ParentProcess string `json:"parent_process,omitempty"`
+	Target        string `json:"target,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+	Direction     string `json:"direction,omitempty"`
+	PID           int    `json:"pid,omitempty"`
+	Rule          string `json:"rule,omitempty"`
+}
+
+func (e RuntimeEvent) SemanticKey() string {
+	return e.Category + "\x00" + e.Operation + "\x00" + e.Process + "\x00" +
+		e.ParentProcess + "\x00" + e.Target + "\x00" + e.Protocol + "\x00" + e.Direction
 }
 
 type ScenarioStepResult struct {
