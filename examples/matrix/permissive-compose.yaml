@@ -1,0 +1,8 @@
+services:
+  app:
+    image: wabi-matrix:v2
+    tmpfs:
+      - /tmp
+      - /var/lib/demo
+    mem_limit: 512m
+    stop_grace_period: 60s
