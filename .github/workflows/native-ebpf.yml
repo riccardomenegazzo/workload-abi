@@ -27,6 +27,16 @@ jobs:
         run: go build -trimpath -o ./bin/wabi-native ./cmd/wabi-native
       - name: Build core CLI
         run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Prepare tracefs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! mountpoint -q /sys/kernel/tracing; then
+            sudo mount -t tracefs tracefs /sys/kernel/tracing
+          fi
+          test -r /sys/kernel/tracing/events/syscalls/sys_enter_execve/format
+          test -r /sys/kernel/tracing/events/syscalls/sys_enter_openat/format
+          test -r /sys/kernel/tracing/events/syscalls/sys_enter_connect/format
       - name: Prove live native eBPF collection
         shell: bash
         run: |
