@@ -28,18 +28,13 @@ func TestBuildCreatesCausalProcessResourceChain(t *testing.T) {
 	if g.Fingerprint == "" {
 		t.Fatal("missing graph fingerprint")
 	}
-	want := map[string]bool{
-		"process:/usr/bin/app\x00spawn\x00process:/usr/bin/helper":                 false,
-		"process:/usr/bin/helper\x00read\x00file:/var/run/secrets/token":          false,
-		"process:/usr/bin/helper\x00connect:outbound\x00endpoint:api.vendor.com:443": false,
+	want := []string{
+		"process:/usr/bin/app\x00spawn\x00process:/usr/bin/helper",
+		"process:/usr/bin/helper\x00read\x00file:/var/run/secrets/token",
+		"process:/usr/bin/helper\x00connect:outbound\x00endpoint:api.vendor.com:443",
 	}
-	for _, edge := range g.Edges {
-		if _, ok := want[edge.Key()]; ok {
-			want[edge.Key()] = true
-		}
-	}
-	for key, found := range want {
-		if !found {
+	for _, key := range want {
+		if !hasEdge(g.Edges, key) {
 			t.Fatalf("missing edge %q in %#v", key, g.Edges)
 		}
 	}
@@ -106,4 +101,13 @@ func TestLoadRejectsTamperedGraph(t *testing.T) {
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected graph fingerprint mismatch")
 	}
+}
+
+func hasEdge(edges []Edge, key string) bool {
+	for _, edge := range edges {
+		if edge.Key() == key {
+			return true
+		}
+	}
+	return false
 }
