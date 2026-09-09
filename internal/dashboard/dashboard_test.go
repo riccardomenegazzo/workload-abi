@@ -106,7 +106,11 @@ func TestLoadRejectsGraphFromDifferentSnapshot(t *testing.T) {
 	matrixPath := filepath.Join(dir, "matrix.json")
 	writeJSON(t, matrixPath, artifact)
 
-	wrong := model.Snapshot{SchemaVersion: model.SchemaVersion, Image: "other"}
+	wrong := model.Snapshot{
+		SchemaVersion: model.SchemaVersion,
+		Image:         "other",
+		RuntimeEvents: []model.RuntimeEvent{{Category: "syscall", Operation: "mount", Process: "/other"}},
+	}
 	wrong.Fingerprint = model.Fingerprint(wrong)
 	wrongGraph := graph.Build(wrong)
 	candidateGraph := graph.Build(candidate)
