@@ -160,9 +160,10 @@ func newTracepointProgram(kind int32, contextOffset int16, events *ebpf.Map) (*e
 		asm.Mov.Reg(asm.R7, asm.R1),
 		asm.Mov.Reg(asm.R6, asm.RFP),
 		asm.Add.Imm(asm.R6, -rawEventSize),
+		asm.Mov.Imm(asm.R8, 0),
 	}
 	for offset := 0; offset < rawEventSize; offset += 8 {
-		insns = append(insns, asm.StoreImm(asm.R6, int16(offset), 0, asm.DWord))
+		insns = append(insns, asm.StoreMem(asm.R6, int16(offset), asm.R8, asm.DWord))
 	}
 	insns = append(insns,
 		asm.StoreImm(asm.R6, 0, int64(kind), asm.Word),
