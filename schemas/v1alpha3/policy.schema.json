@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/v1alpha3/policy.schema.json",
+  "title": "Workload ABI Compatibility Policy",
+  "type": "object",
+  "properties": {
+    "name": {"type": "string"},
+    "require_scenario": {"type": "boolean"},
+    "require_target": {"type": "boolean"},
+    "deny_severities": {"type": "array", "items": {"enum": ["info", "warning", "breaking"]}, "uniqueItems": true},
+    "deny_surfaces": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "deny_kinds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "max_changes": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}
