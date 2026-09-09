@@ -36,6 +36,12 @@ func main() {
 		os.Exit(runAttest(os.Args[2:]))
 	case "verify-attestation":
 		os.Exit(runVerifyAttestation(os.Args[2:]))
+	case "deployment-attest":
+		os.Exit(runDeploymentAttest(os.Args[2:]))
+	case "verify-deployment-attestation":
+		os.Exit(runVerifyDeploymentAttestation(os.Args[2:]))
+	case "verify-deployment-predicate":
+		os.Exit(runVerifyDeploymentPredicate(os.Args[2:]))
 	case "doctor":
 		os.Exit(runDoctor(os.Args[2:]))
 	case "version", "--version", "-v":
@@ -63,6 +69,9 @@ Commands:
   wabi dashboard         --matrix MATRIX.json [flags]
   wabi attest            [flags] COMPARISON.json
   wabi verify-attestation [flags] ATTESTATION.json
+  wabi deployment-attest --matrix MATRIX.json [flags]
+  wabi verify-deployment-attestation [flags] DEPLOYMENT.intoto.json
+  wabi verify-deployment-predicate [flags] PREDICATE.json
   wabi doctor            [--json]
   wabi version
 
@@ -90,6 +99,12 @@ Deployability dashboard:
   wabi dashboard --matrix matrix.json
   wabi dashboard --matrix matrix.json --baseline-graph baseline.graph.json --candidate-graph candidate.graph.json
   wabi dashboard --matrix matrix.json --export dashboard.html
+
+Supply-chain deployment evidence:
+  wabi deployment-attest --matrix matrix.json --candidate-snapshot candidate.json --output deployment.intoto.json
+  wabi deployment-attest --matrix matrix.json --predicate-only --output deployment.predicate.json
+  wabi verify-deployment-attestation deployment.intoto.json
+  wabi verify-deployment-predicate deployment.predicate.json
 
 Seccomp proof from exact syscall evidence:
   wabi compare-snapshots --seccomp-profile seccomp.json BASELINE.json CANDIDATE.json
