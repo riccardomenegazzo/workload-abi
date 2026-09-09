@@ -126,6 +126,68 @@ jobs:
           grep -q '"category": "file"' /tmp/tracee-deep.json
           grep -q '"category": "network"' /tmp/tracee-deep.json
           grep -q 'telemetry.example.com:443' /tmp/tracee-deep.json
+      - name: Prove causal runtime graph and explanation
+        shell: bash
+        run: |
+          ./bin/wabi enrich \
+            --snapshot /tmp/baseline.json \
+            --events ./examples/deep/graph-baseline.jsonl \
+            --format generic \
+            --output /tmp/baseline-causal.json
+          ./bin/wabi enrich \
+            --snapshot /tmp/candidate.json \
+            --events ./examples/deep/graph-candidate.jsonl \
+            --format generic \
+            --output /tmp/candidate-causal.json
+
+          ./bin/wabi graph --output /tmp/baseline.graph.json /tmp/baseline-causal.json
+          ./bin/wabi graph --output /tmp/candidate.graph.json /tmp/candidate-causal.json
+
+          grep -q '"schema_version": "wabi.graph/v1alpha1"' /tmp/candidate.graph.json
+          grep -q '"snapshot_fingerprint": "sha256:' /tmp/candidate.graph.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate.graph.json
+          grep -q 'process:/usr/bin/helper' /tmp/candidate.graph.json
+          grep -q 'file:/var/run/secrets/token' /tmp/candidate.graph.json
+          grep -q 'endpoint:api.vendor.com:443' /tmp/candidate.graph.json
+
+          set +e
+          ./bin/wabi graph-diff --fail-on-change --format json \
+            /tmp/baseline.graph.json /tmp/candidate.graph.json > /tmp/graph-diff.json
+          code=$?
+          set -e
+          cat /tmp/graph-diff.json
+          test "$code" -eq 3
+          grep -q '"schema_version": "wabi.graph-diff/v1alpha1"' /tmp/graph-diff.json
+          grep -q '"kind": "new-process-chain"' /tmp/graph-diff.json
+          grep -q '/usr/bin/helper' /tmp/graph-diff.json
+          grep -q '/usr/bin/app' /tmp/graph-diff.json
+          grep -q '/var/run/secrets/token' /tmp/graph-diff.json
+          grep -q 'api.vendor.com:443' /tmp/graph-diff.json
+
+          ./bin/wabi graph-diff /tmp/baseline.graph.json /tmp/candidate.graph.json > /tmp/graph-human.txt
+          cat /tmp/graph-human.txt
+          grep -q 'CAUSAL EXPLANATIONS' /tmp/graph-human.txt
+          grep -q 'New process /usr/bin/helper is spawned by /usr/bin/app' /tmp/graph-human.txt
+      - name: Prove causal graph tamper detection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          with open("/tmp/candidate.graph.json") as f:
+              data = json.load(f)
+          if not data.get("edges"):
+              raise SystemExit("candidate graph fixture must contain edges")
+          data["edges"][0]["relation"] = data["edges"][0]["relation"] + "-tampered"
+          with open("/tmp/candidate.graph-tampered.json", "w") as f:
+              json.dump(data, f)
+          PY
+          set +e
+          ./bin/wabi graph-diff /tmp/baseline.graph.json /tmp/candidate.graph-tampered.json > /tmp/graph-tamper.out 2>&1
+          code=$?
+          set -e
+          cat /tmp/graph-tamper.out
+          test "$code" -eq 1
+          grep -qi 'graph fingerprint mismatch' /tmp/graph-tamper.out
       - name: Prove offline target-aware comparison
         shell: bash
         run: |
