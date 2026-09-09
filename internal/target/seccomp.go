@@ -23,12 +23,12 @@ type SeccompProfile struct {
 }
 
 type SeccompSyscallRule struct {
-	Names       []string        `json:"names"`
-	Action      string          `json:"action"`
+	Names       []string          `json:"names"`
+	Action      string            `json:"action"`
 	Args        []json.RawMessage `json:"args,omitempty"`
-	Includes    json.RawMessage `json:"includes,omitempty"`
-	Excludes    json.RawMessage `json:"excludes,omitempty"`
-	Conditional bool            `json:"-"`
+	Includes    json.RawMessage   `json:"includes,omitempty"`
+	Excludes    json.RawMessage   `json:"excludes,omitempty"`
+	Conditional bool              `json:"-"`
 }
 
 func LoadSeccompProfile(path string) (SeccompProfile, error) {
