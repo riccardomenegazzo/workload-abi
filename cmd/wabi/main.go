@@ -36,6 +36,10 @@ func main() {
 		os.Exit(runRecord(os.Args[2:]))
 	case "enrich":
 		os.Exit(runEnrich(os.Args[2:]))
+	case "graph":
+		os.Exit(runGraph(os.Args[2:]))
+	case "graph-diff":
+		os.Exit(runGraphDiff(os.Args[2:]))
 	case "compare-snapshots":
 		os.Exit(runCompareSnapshots(os.Args[2:]))
 	case "attest":
@@ -457,6 +461,8 @@ Commands:
   wabi compare [flags] BASELINE_IMAGE CANDIDATE_IMAGE
   wabi record            [flags] IMAGE
   wabi enrich            --snapshot SNAPSHOT.json --events EVENTS.jsonl --format falco|tracee|generic
+  wabi graph             [--output FILE] SNAPSHOT.json
+  wabi graph-diff        [--format human|json] BASELINE.graph.json CANDIDATE.graph.json
   wabi compare-snapshots [flags] BASELINE.json CANDIDATE.json
   wabi attest            [flags] COMPARISON.json
   wabi verify-attestation [flags] ATTESTATION.json
@@ -468,6 +474,10 @@ Equivalent multi-phase experiment:
 
 Deep runtime evidence:
   wabi enrich --snapshot snapshot.json --events falco.jsonl --format falco --output enriched.json
+
+Causal runtime graph:
+  wabi graph --output candidate.graph.json candidate.enriched.json
+  wabi graph-diff baseline.graph.json candidate.graph.json
 
 Target-aware comparison:
   wabi compare --target compose.yaml --service api BASELINE CANDIDATE

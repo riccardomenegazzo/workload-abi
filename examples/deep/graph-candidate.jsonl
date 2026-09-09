@@ -1,0 +1,4 @@
+{"source":"generic","category":"file","operation":"open","process":"/usr/bin/app","parent_process":"/sbin/init","target":"/etc/app/config.yaml"}
+{"source":"generic","category":"process","operation":"spawn","process":"/usr/bin/helper","parent_process":"/usr/bin/app"}
+{"source":"generic","category":"file","operation":"read","process":"/usr/bin/helper","parent_process":"/usr/bin/app","target":"/var/run/secrets/token"}
+{"source":"generic","category":"network","operation":"connect","process":"/usr/bin/helper","parent_process":"/usr/bin/app","target":"api.vendor.com:443","protocol":"tcp","direction":"outbound"}

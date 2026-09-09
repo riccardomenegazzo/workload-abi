@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wabi.dev/schemas/graph/v1alpha1/graph.schema.json",
+  "title": "Workload ABI Causal Runtime Graph",
+  "type": "object",
+  "required": ["schema_version", "snapshot_schema", "snapshot_fingerprint", "fingerprint", "nodes", "edges"],
+  "properties": {
+    "schema_version": {"const": "wabi.graph/v1alpha1"},
+    "snapshot_schema": {"type": "string", "minLength": 1},
+    "snapshot_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "image": {"type": "string"},
+    "scenario": {"type": "string"},
+    "nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "label"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "relation", "to"],
+      "properties": {
+        "from": {"type": "string", "minLength": 1},
+        "relation": {"type": "string", "minLength": 1},
+        "to": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
