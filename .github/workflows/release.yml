@@ -33,9 +33,16 @@ jobs:
             ext="$3"
             name="wabi_${version}_${os}_${arch}"
             mkdir -p "dist/${name}"
+
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -trimpath -ldflags "-s -w -X main.version=${version}" \
               -o "dist/${name}/wabi${ext}" ./cmd/wabi
+
+            if [ "$os" = "linux" ]; then
+              CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+                go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+                -o "dist/${name}/wabi-native" ./cmd/wabi-native
+            fi
 
             if [ "$os" = "windows" ]; then
               (cd dist && zip -q -r "${name}.zip" "${name}")
@@ -55,6 +62,16 @@ jobs:
 
           tar -C schemas -czf "dist/wabi_${version}_schemas.tar.gz" .
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Verify Linux release archives contain native provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          for arch in amd64 arm64; do
+            archive="dist/wabi_${version}_linux_${arch}.tar.gz"
+            tar -tzf "$archive" | grep -q "/wabi$"
+            tar -tzf "$archive" | grep -q "/wabi-native$"
+          done
       - name: Log in to GHCR
         shell: bash
         env:
