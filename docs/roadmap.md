@@ -94,21 +94,37 @@ The following deeper native coverage remains intentionally incremental rather th
 
 See [`native-ebpf.md`](native-ebpf.md).
 
-## v0.7 — Environment proof expansion
+## v0.7 — Environment proof expansion 🚧
 
-Goal: solve more production constraints using the evidence and causal graph already captured.
+Goal: solve production constraints using observed evidence and the causal model, while issuing `BREAKING` only when an incompatibility is actually provable.
 
-Planned:
+Delivered so far:
 
-- seccomp profiles;
+- Kubernetes workload namespace and Pod-template label identity;
+- Kubernetes NetworkPolicy selection using `matchLabels` and `matchExpressions`;
+- additive egress-policy semantics;
+- `ipBlock` CIDR and `except` proof;
+- protocol, numeric port and `endPort` proof;
+- conservative unresolved handling for destination selectors, named ports, and hostname/IP mismatches;
+- end-to-end proof that a newly observed outbound dependency can be rejected by the target NetworkPolicy;
+- Docker/OCI-style seccomp profile parsing;
+- conservative seccomp action classification (`allow`, `deny`, `unknown`);
+- release-regression proof for newly observed exact `category=syscall` requirements;
+- explicit unknown handling for argument-conditional rules, `TRACE`, `NOTIFY`, and profile conditions;
+- end-to-end seccomp proof from persisted snapshot + public RuntimeEvent enrichment to `syscall / target-conflict`.
+
+Still planned:
+
 - AppArmor profiles;
-- Kubernetes NetworkPolicy;
-- Pod Security constraints;
+- broader exact syscall identity without weakening published v1alpha3 semantics;
+- Pod Security constraints beyond the current container security-context checks;
 - Helm-rendered Kubernetes targets;
 - ECS task definitions;
 - richer Compose resource/network semantics;
-- use observed outbound dependencies to prove NetworkPolicy conflicts;
+- destination workload identity for NetworkPolicy pod/namespace selector proof;
 - map causal graph edges to the exact target constraint they violate.
+
+The v0.7 design rule is: **unknown is not breaking**. Target solvers must preserve uncertainty rather than manufacture confidence from incomplete runtime evidence.
 
 ## v0.8 — Supply-chain trust integration
 

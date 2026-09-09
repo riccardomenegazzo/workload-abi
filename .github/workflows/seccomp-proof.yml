@@ -1,0 +1,61 @@
+name: Seccomp Proof
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  seccomp-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Unit proof
+        run: go test ./internal/target ./internal/compat
+      - name: Build wabi
+        run: go build -trimpath -o ./bin/wabi ./cmd/wabi
+      - name: Build deterministic workload
+        run: docker build -t wabi-seccomp:fixture ./examples/demo/v1
+      - name: Record equivalent snapshots
+        shell: bash
+        run: |
+          ./bin/wabi record --observe 500ms wabi-seccomp:fixture > /tmp/baseline.json
+          ./bin/wabi record --observe 500ms wabi-seccomp:fixture > /tmp/candidate.json
+          grep -q '"fingerprint": "sha256:' /tmp/baseline.json
+          grep -q '"fingerprint": "sha256:' /tmp/candidate.json
+      - name: Add exact candidate syscall evidence
+        shell: bash
+        run: |
+          ./bin/wabi enrich \
+            --snapshot /tmp/candidate.json \
+            --events ./examples/seccomp/candidate-syscalls.jsonl \
+            --format generic \
+            --output /tmp/candidate-deep.json
+          grep -q '"category": "syscall"' /tmp/candidate-deep.json
+          grep -q '"operation": "bpf"' /tmp/candidate-deep.json
+      - name: Prove seccomp blocks the new syscall requirement
+        shell: bash
+        run: |
+          set +e
+          ./bin/wabi compare-snapshots \
+            --seccomp-profile ./examples/seccomp/profile.json \
+            --format json \
+            /tmp/baseline.json /tmp/candidate-deep.json > /tmp/seccomp-report.json
+          code=$?
+          set -e
+
+          cat /tmp/seccomp-report.json
+          test "$code" -eq 4
+          jq -e '.verdict == "BREAKING"' /tmp/seccomp-report.json >/dev/null
+          jq -e '.target == "seccomp:profile.json"' /tmp/seccomp-report.json >/dev/null
+          jq -e '.changes[] | select(.surface == "syscall" and .kind == "target-conflict" and .after == "bpf" and .severity == "breaking")' /tmp/seccomp-report.json >/dev/null
+          jq -e '[.changes[] | select(.severity == "breaking" and .surface != "syscall")] | length == 0' /tmp/seccomp-report.json >/dev/null
