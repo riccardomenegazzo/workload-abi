@@ -23,10 +23,10 @@ type ProbeStatus struct {
 // Stats contains collection diagnostics that are intentionally not part of
 // RuntimeEvent semantic identity.
 type Stats struct {
-	Captured   int           `json:"captured"`
-	LostSamples uint64       `json:"lost_samples"`
-	Duration   time.Duration `json:"duration"`
-	Probes     []ProbeStatus `json:"probes"`
+	Captured    int           `json:"captured"`
+	LostSamples uint64        `json:"lost_samples"`
+	Duration    time.Duration `json:"duration"`
+	Probes      []ProbeStatus `json:"probes"`
 }
 
 // Result is the native provider output before the CLI emits the interoperable
