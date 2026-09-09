@@ -111,7 +111,14 @@ Delivered so far:
 - conservative seccomp action classification (`allow`, `deny`, `unknown`);
 - release-regression proof for newly observed exact `category=syscall` requirements;
 - explicit unknown handling for argument-conditional rules, `TRACE`, `NOTIFY`, and profile conditions;
-- end-to-end seccomp proof from persisted snapshot + public RuntimeEvent enrichment to `syscall / target-conflict`.
+- end-to-end seccomp proof from persisted snapshot + public RuntimeEvent enrichment to `syscall / target-conflict`;
+- native Amazon ECS task-definition JSON target and auto-detection;
+- explicit ECS container selection and stable `ecs:<family>#<container>` identity;
+- ECS `readonlyRootFilesystem` proof with writable `mountPoints` exemptions;
+- ECS task/container hard `memory` limits with `memoryReservation` preserved as soft-only evidence;
+- explicit ECS `stopTimeout` proof without inventing a default when absent;
+- ECS Linux capability constraint parsing and compatibility reuse;
+- end-to-end proof that the same persisted Operational ABI can produce an ECS `filesystem / target-conflict`.
 
 Still planned:
 
@@ -119,7 +126,6 @@ Still planned:
 - broader exact syscall identity without weakening published v1alpha3 semantics;
 - Pod Security constraints beyond the current container security-context checks;
 - Helm-rendered Kubernetes targets;
-- ECS task definitions;
 - richer Compose resource/network semantics;
 - destination workload identity for NetworkPolicy pod/namespace selector proof;
 - map causal graph edges to the exact target constraint they violate.
@@ -144,7 +150,7 @@ Workload ABI should not declare a stable 1.0 specification until all of the foll
 
 1. snapshot/comparison schemas have a documented compatibility policy;
 2. at least two independent evidence providers can produce compatible normalized evidence;
-3. target solving supports Docker Compose and Kubernetes with a stable rule model;
+3. target solving supports Docker Compose, Kubernetes, and Amazon ECS with a stable rule model;
 4. persisted evidence and attestation formats have interoperability tests;
 5. nondeterminism is measured and documented;
 6. the project has a corpus of reproducible compatibility scenarios;
