@@ -1,0 +1,1 @@
+{"time":"2026-09-09T06:00:00Z","rule":"Application config read","priority":"Informational","output_fields":{"evt.type":"openat","proc.exepath":"/usr/bin/app","proc.pexepath":"/sbin/init","proc.pid":101,"fd.name":"/etc/app/config.yaml"}}
