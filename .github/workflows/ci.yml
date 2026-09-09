@@ -81,11 +81,51 @@ jobs:
             --scenario ./examples/demo/scenario.json \
             wabi-demo:v2 > /tmp/candidate.json
 
-          grep -q '"schema_version": "wabi.dev/v1alpha2"' /tmp/baseline.json
+          grep -q '"schema_version": "wabi.dev/v1alpha3"' /tmp/baseline.json
           grep -q '"scenario_steps"' /tmp/baseline.json
           grep -q '"success": true' /tmp/baseline.json
           grep -q '"fingerprint": "sha256:' /tmp/baseline.json
           grep -q '"fingerprint": "sha256:' /tmp/candidate.json
+      - name: Prove Falco deep evidence enrichment
+        shell: bash
+        run: |
+          ./bin/wabi enrich \
+            --snapshot /tmp/baseline.json \
+            --events ./examples/deep/falco-baseline.jsonl \
+            --format falco \
+            --output /tmp/baseline-deep.json
+          ./bin/wabi enrich \
+            --snapshot /tmp/candidate.json \
+            --events ./examples/deep/falco-candidate.jsonl \
+            --format falco \
+            --output /tmp/candidate-deep.json
+
+          grep -q '"runtime_events"' /tmp/baseline-deep.json
+          grep -q 'telemetry.example.com:443' /tmp/candidate-deep.json
+          grep -q '"source": "falco"' /tmp/candidate-deep.json
+
+          set +e
+          ./bin/wabi compare-snapshots --fail-on-change --format json \
+            /tmp/baseline-deep.json /tmp/candidate-deep.json > /tmp/deep-report.json
+          code=$?
+          set -e
+          cat /tmp/deep-report.json
+          test "$code" -eq 3
+          grep -q 'runtime-network' /tmp/deep-report.json
+          grep -q 'runtime-event-added' /tmp/deep-report.json
+          grep -q 'telemetry.example.com:443' /tmp/deep-report.json
+      - name: Prove Tracee adapter normalization
+        shell: bash
+        run: |
+          ./bin/wabi enrich \
+            --snapshot /tmp/baseline.json \
+            --events ./examples/deep/tracee.jsonl \
+            --format tracee \
+            --output /tmp/tracee-deep.json
+          grep -q '"source": "tracee"' /tmp/tracee-deep.json
+          grep -q '"category": "file"' /tmp/tracee-deep.json
+          grep -q '"category": "network"' /tmp/tracee-deep.json
+          grep -q 'telemetry.example.com:443' /tmp/tracee-deep.json
       - name: Prove offline target-aware comparison
         shell: bash
         run: |
@@ -111,17 +151,17 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
-          path = "/tmp/candidate.json"
+          path = "/tmp/candidate-deep.json"
           with open(path) as f:
               data = json.load(f)
-          if not data.get("filesystem"):
-              raise SystemExit("candidate fixture must contain fingerprinted filesystem evidence")
-          data["filesystem"][0]["path"] = data["filesystem"][0]["path"] + "-tampered"
+          if not data.get("runtime_events"):
+              raise SystemExit("candidate fixture must contain fingerprinted deep runtime evidence")
+          data["runtime_events"][0]["target"] = data["runtime_events"][0].get("target", "") + "-tampered"
           with open("/tmp/candidate-tampered.json", "w") as f:
               json.dump(data, f)
           PY
           set +e
-          ./bin/wabi compare-snapshots /tmp/baseline.json /tmp/candidate-tampered.json >/tmp/tamper.out 2>&1
+          ./bin/wabi compare-snapshots /tmp/baseline-deep.json /tmp/candidate-tampered.json >/tmp/tamper.out 2>&1
           code=$?
           set -e
           cat /tmp/tamper.out
