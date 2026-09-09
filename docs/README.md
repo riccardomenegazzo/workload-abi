@@ -6,6 +6,7 @@
 - [`native-ebpf.md`](native-ebpf.md) — optional Linux eBPF provider, privilege boundary, live recording, diagnostics, and CI proof.
 - [`causal-runtime-graph.md`](causal-runtime-graph.md) — deterministic graph derivation, fingerprints, edge semantics, causal explanations, and inference boundaries.
 - [`seccomp-proof.md`](seccomp-proof.md) — conservative proof of new exact syscall requirements against Docker/OCI seccomp profiles.
+- [`ecs-proof.md`](ecs-proof.md) — Amazon ECS task-definition target semantics, hard/soft resource constraints, and end-to-end proof.
 - [`roadmap.md`](roadmap.md) — capability roadmap and 1.0 maturity gates.
 
 Repository-level guides:

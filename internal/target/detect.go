@@ -21,6 +21,9 @@ func Detect(path string) (string, error) {
 		if err := json.Unmarshal(data, &obj); err != nil {
 			return "", fmt.Errorf("parse target JSON: %w", err)
 		}
+		if _, ok := obj["containerDefinitions"]; ok {
+			return "ecs", nil
+		}
 		if _, ok := obj["apiVersion"]; ok {
 			if _, ok := obj["kind"]; ok {
 				return "kubernetes", nil
@@ -39,5 +42,5 @@ func Detect(path string) (string, error) {
 			return "compose", nil
 		}
 	}
-	return "", fmt.Errorf("cannot detect target type; use --target-kind compose or kubernetes")
+	return "", fmt.Errorf("cannot detect target type; use --target-kind compose, kubernetes, or ecs")
 }
