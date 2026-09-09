@@ -25,11 +25,11 @@ func runCompare(args []string) int {
 	outputFormat := fs.String("format", "human", "output format: human, json, or sarif")
 	jsonOut := fs.Bool("json", false, "deprecated alias for --format json")
 	failOnChange := fs.Bool("fail-on-change", false, "exit with status 3 when any runtime change is found")
-	targetFile := fs.String("target", "", "target environment file (Docker Compose or Kubernetes)")
-	targetKind := fs.String("target-kind", "auto", "target type: auto, compose, or kubernetes")
+	targetFile := fs.String("target", "", "target environment file (Docker Compose, Kubernetes, or ECS task definition)")
+	targetKind := fs.String("target-kind", "auto", "target type: auto, compose, kubernetes, or ecs")
 	service := fs.String("service", "", "Compose service to evaluate")
 	workload := fs.String("workload", "", "Kubernetes workload to evaluate")
-	containerName := fs.String("container", "", "Kubernetes container to evaluate")
+	containerName := fs.String("container", "", "Kubernetes or ECS container to evaluate")
 	networkPolicyFile := fs.String("network-policy", "", "Kubernetes NetworkPolicy file used to prove observed egress compatibility")
 	scenarioFile := fs.String("scenario", "", "JSON scenario applied identically to both releases")
 	policyFile := fs.String("policy", "", "JSON compatibility policy")
@@ -158,11 +158,11 @@ func runCompareSnapshots(args []string) int {
 	outputFormat := fs.String("format", "human", "output format: human, json, or sarif")
 	jsonOut := fs.Bool("json", false, "deprecated alias for --format json")
 	failOnChange := fs.Bool("fail-on-change", false, "exit with status 3 when any change is found")
-	targetFile := fs.String("target", "", "target environment file (Docker Compose or Kubernetes)")
-	targetKind := fs.String("target-kind", "auto", "target type: auto, compose, or kubernetes")
+	targetFile := fs.String("target", "", "target environment file (Docker Compose, Kubernetes, or ECS task definition)")
+	targetKind := fs.String("target-kind", "auto", "target type: auto, compose, kubernetes, or ecs")
 	service := fs.String("service", "", "Compose service to evaluate")
 	workload := fs.String("workload", "", "Kubernetes workload to evaluate")
-	containerName := fs.String("container", "", "Kubernetes container to evaluate")
+	containerName := fs.String("container", "", "Kubernetes or ECS container to evaluate")
 	networkPolicyFile := fs.String("network-policy", "", "Kubernetes NetworkPolicy file used to prove observed egress compatibility")
 	seccompProfileFile := fs.String("seccomp-profile", "", "Docker/OCI seccomp profile used to prove exact observed syscall compatibility")
 	policyFile := fs.String("policy", "", "JSON compatibility policy")
@@ -308,6 +308,15 @@ func applyTarget(
 			t.NetworkPolicies = policies
 		}
 		return compat.ApplyKubernetes(c, base, candidate, t), nil
+	case "ecs":
+		if networkPolicyFile != "" {
+			return c, fmt.Errorf("--network-policy is only valid with a Kubernetes target")
+		}
+		t, err := target.LoadECS(file, containerName)
+		if err != nil {
+			return c, err
+		}
+		return compat.ApplyECS(c, base, candidate, t), nil
 	default:
 		return c, fmt.Errorf("unsupported target kind %q", kind)
 	}
